@@ -3,8 +3,9 @@ from pathlib import Path
 
 from .base import EnginePlugin, LangPack, Segment
 from .rpgmaker_mz import RpgMakerMZ
+from .rpgmaker_mv import RpgMakerMV
 
-PLUGINS: list[EnginePlugin] = [RpgMakerMZ()]
+PLUGINS: list[EnginePlugin] = [RpgMakerMZ(), RpgMakerMV()]
 MIN_SCORE = 0.9
 
 

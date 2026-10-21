@@ -4,7 +4,8 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from . import engines, exchange, writeback
+from . import engines, exchange, pipeline, writeback
+from .backends.sakura import Sakura, SakuraConfig
 from .backup import Backup
 from .extract import LanguageGateStop, extract, project_dir
 from .exchange import Store
@@ -14,19 +15,39 @@ _LANG = {"ja": "日文", "mixed": "混合（部分已是中文）", "zh-Hans": "
 _REASON = {"placeholders": "佔位符不符", "newlines": "換行數不符", "length_ratio": "長度比例異常",
            "kana_residue": "殘留日文", "repetition": "重複退化", "extra_text": "含多餘說明",
            "empty": "譯文空白", "unknown_id": "找不到 id", "src_changed": "原文已變動",
-           "reviewed": "已人工審閱，不覆蓋", "no_dst": "沒有 dst", "bad_json": "JSON 格式錯誤"}
+           "reviewed": "已人工審閱，不覆蓋", "no_dst": "沒有 dst", "bad_json": "JSON 格式錯誤",
+           "line_count": "回應行數不符", "too_long": "輸入或輸出超出限制",
+           "transient": "連線重試耗盡", "refused": "模型拒絕翻譯"}
 
 
 def main(argv=None) -> int:
-    sys.stdout.reconfigure(errors="replace")
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     ap = argparse.ArgumentParser(prog="yakupatch", description="遊戲文本翻譯：提取、匯出入、寫回、還原")
     ap.add_argument("--home", type=Path, help="專案資料存放位置（預設 ~/.yakupatch/projects）")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name, help_ in [("detect", "偵測引擎"), ("extract", "提取文本"), ("status", "顯示進度"),
                         ("export", "匯出分批檔"), ("import", "匯入譯文"), ("apply", "寫回遊戲"),
-                        ("restore", "還原遊戲"), ("undo", "撤銷一次匯入")]:
+                        ("restore", "還原遊戲"), ("undo", "撤銷一次匯入"), ("translate", "Sakura 本地翻譯")]:
         p = sub.add_parser(name, help=help_)
         p.add_argument("game", type=Path)
+        if name == "translate":
+            p.add_argument("--backend", choices=["sakura"], default="sakura", help="翻譯後端")
+            p.add_argument("--limit", type=int, help="只翻前 N 筆（名稱／系統優先）")
+            p.add_argument("--dry-run", action="store_true", help="只預估，不連網、不修改專案")
+            p.add_argument("--api-base", default="http://127.0.0.1:8080/v1", help="Sakura API 位址")
+            p.add_argument("--model", default="", help="模型名稱（預設讀 /models）")
+            p.add_argument("--version", choices=["0.9", "1.0", "galtransl-v1"], default="1.0", help="提示詞版本")
+            p.add_argument("--timeout", type=float, default=999, help="請求逾時秒數")
+            p.add_argument("--parallel", type=int, help="平行數上限（預設讀 /props）")
+            p.add_argument("--retries", type=int, default=3, help="連線暫時失敗的重試次數（0–5）")
+            p.add_argument("--max-tokens", type=int, default=1024, help="每次最大輸出 token")
+            p.add_argument("--temperature", type=float, default=0.1, help="取樣溫度")
+            p.add_argument("--top-p", type=float, default=0.3, help="取樣 top_p")
+            p.add_argument("--frequency-penalty", type=float, default=0.05, help="頻率懲罰")
+            p.add_argument("--force-glossary", action="store_true", help="每批附上整份術語表")
+            p.add_argument("--enlarge-kana", action="store_true", help="放大小假名")
+            p.add_argument("--repeat-threshold", type=int, default=20, help="重複退化偵測門檻")
         if name == "extract":
             p.add_argument("--force", action="store_true", help="遊戲已是中文仍要提取")
         if name == "import":
@@ -38,6 +59,9 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     try:
         return _run(args)
+    except KeyboardInterrupt:
+        print("已中斷；已完成批次已保存，重跑 translate 即可續跑。")
+        return 130
     except (LanguageGateStop, writeback.GameChanged, ValueError, OSError, RuntimeError) as ex:
         print(f"錯誤：{ex}")
         return 1
@@ -72,6 +96,24 @@ def _run(args) -> int:
         _status(store)
     elif args.cmd == "status":
         _status(store)
+    elif args.cmd == "translate":
+        if not store.manifest:
+            raise ValueError("尚未提取文本，請先執行 extract")
+        pipeline.select(store, args.limit)
+        backend = Sakura(SakuraConfig(**{key: getattr(args, key) for key in SakuraConfig.__dataclass_fields__}))
+        if not args.dry_run:
+            backend.prepare()
+        est = pipeline.estimate(store, plugin.control_codes, backend, args.limit)
+        print(f"待翻 {est['items']} 筆、{est['characters']:,} 字，快取 {est['cached']} 筆、"
+              f"約 {est['batches']} 批，預估 {est['seconds']} 秒（未計重試；離線槽數未經伺服器確認）。")
+        if args.dry_run:
+            return 0
+        result = pipeline.run(store, plugin.control_codes, backend, args.limit,
+                              progress=lambda s: print(f"已翻 {s['translated']}、失敗 {s['failed']}", flush=True))
+        print(f"翻譯紀錄 {result['run']}：成功 {result['translated']}、失敗 {result['failed']}，耗時 {result['seconds']} 秒")
+        for reason, n in result["errors"].items():
+            print(f"  {_REASON.get(reason, reason)}：{n}")
+        return 1 if result["failed"] else 0
     elif args.cmd == "export":
         paths = exchange.export_batches(store, plugin.control_codes)
         print(f"已匯出 {len(paths)} 個分批檔到 {store.dir / 'batches' / 'out'}（填寫說明：INSTRUCTIONS.md）")
