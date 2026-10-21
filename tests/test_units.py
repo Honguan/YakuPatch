@@ -1,0 +1,167 @@
+import json
+import unittest
+
+from yakupatch import engines, exchange, translate, writeback
+from yakupatch.backup import BACKUP_DIR, Backup
+from yakupatch.encoding import decode, encode
+from yakupatch.exchange import Store
+from yakupatch.extract import LanguageGateStop, extract, project_dir
+from yakupatch.fsutil import sha256
+from yakupatch.jsonspan import replace_strings, string_spans
+from yakupatch.langdetect import probe, sentence_is_chinese
+from yakupatch.safety import UnsafePath, safe_path
+
+from helpers import copy_game, fill_batches, snapshot
+
+MZ = engines.PLUGINS[0]
+
+
+class Units(unittest.TestCase):
+    def test_jsonspan(self):
+        text = '{"a":[1,2.5e3,"x\\"y",null],"b/c":{"d":"日本"}, "e":true}'
+        spans = string_spans(text)
+        self.assertEqual(set(spans), {"/a/2", "/b~1c/d"})
+        out = replace_strings(text, {"/b~1c/d": '中"文'})
+        self.assertEqual(json.loads(out)["b/c"]["d"], '中"文')
+        self.assertEqual(out.replace('"中\\"文"', '"日本"'), text)
+
+    def test_encoding_roundtrip(self):
+        for raw in ["\ufeff{\"a\":\"あ\"}".encode("utf-8"), "あいう".encode("cp932"), "x".encode("utf-16")]:
+            text, info = decode(raw)
+            self.assertEqual(encode(text, info), raw)
+
+    def test_safe_path(self):
+        root = copy_game("mz_min")[0]
+        for bad in ["../x", "..\\x", "C:/Windows/x", "/etc/passwd", "data/../../x"]:
+            with self.assertRaises(UnsafePath):
+                safe_path(root, bad)
+        self.assertEqual(safe_path(root, "data/System.json"), (root / "data" / "System.json").resolve())
+
+    def test_mask_validate(self):
+        masked, masks = translate.mask("\\C[2]こんにちは\\C[0]\\{", MZ.control_codes)
+        self.assertEqual(masked, "<0>こんにちは<1>")
+        self.assertEqual(masks["<1>"], "\\C[0]\\{")
+        self.assertEqual(translate.validate(masked, "<0>你好<1>", masks), [])
+        self.assertIn("placeholders", translate.validate(masked, "<0>你好", masks))
+        self.assertIn("kana_residue", translate.validate("今日はいい天気", "今日はいい天气", {}))
+        self.assertIn("newlines", translate.validate("あ\nい", "啊", {}))
+        self.assertIn("extra_text", translate.validate("こんにちは", "翻译：你好", {}))
+        self.assertIn("repetition", translate.validate("はい", "是是是是是", {}))
+        alt, alt_masks = translate.mask("\\ct<1>番目", MZ.control_codes)
+        self.assertEqual(alt, "⟦0⟧<1>番目")      # literal <1> in source switches placeholder style
+
+    def test_language(self):
+        self.assertFalse(sentence_is_chinese("魔法陣"))
+        self.assertFalse(sentence_is_chinese("田中"))
+        self.assertTrue(sentence_is_chinese("你好，这是中文。"))
+        self.assertTrue(sentence_is_chinese("你說什麼呢"))
+        self.assertEqual(probe(["这是简体中文的句子，我们今天去学校了。" * 5])["primary"], "zh-Hans")
+        self.assertEqual(probe(["這是繁體中文的句子，我們今天去學校了。" * 5])["primary"], "zh-Hant")
+        self.assertEqual(probe(["今日はいい天気ですね。魔法陣を描こう。" * 5])["primary"], "ja")
+
+    def test_store_journal_replay_undo(self):
+        game, home = copy_game("mz_min")
+        store = Store(project_dir(game, MZ, home))
+        store.replace({"a": {"id": "a", "dst": "", "status": "pending"}}, {"format": "x"})
+        store.update_many("r1", [("a", {"dst": "甲", "status": "translated"})])
+        with open(store.dir / "journal.jsonl", "a", encoding="utf-8") as f:
+            f.write('{"run":"r2","id":"a","set":{"dst"')          # torn last line
+        again = Store(store.dir)
+        self.assertEqual(again.records["a"]["dst"], "甲")
+        again.compact()
+        self.assertEqual(Store(store.dir).undo("r1"), 1)
+        self.assertEqual(Store(store.dir).records["a"]["status"], "pending")
+
+
+class EndToEnd(unittest.TestCase):
+    def setUp(self):
+        self.game, home = copy_game("mz_min")
+        self.store = Store(project_dir(self.game, MZ, home))
+        self.original = snapshot(self.game)
+
+    def translate_all(self):
+        extract(self.game, MZ, self.store)
+        exchange.export_batches(self.store, MZ.control_codes)
+        n = fill_batches(self.store.dir)
+        files = sorted((self.store.dir / "batches" / "in").glob("*.jsonl"))
+        ok, bad = exchange.import_batches(self.store, MZ.control_codes, files, exchange.new_run())
+        self.assertEqual((ok, bad), (n, {}))
+
+    def test_extract_classification(self):
+        extract(self.game, MZ, self.store)
+        recs = {r["src"]: r for r in self.store.records.values()}
+        self.assertEqual(recs["\\C[2]こんにちは！\\C[0]\n\n今日は\\N[1]と\\V[3]回目の冒険だね。\\{"]["speaker"], "リリア")
+        self.assertEqual(recs["你好，这是中文。\n12345"]["status"], "skip")
+        self.assertIn("uncertain", recs["ありがとう"]["flags"])
+        self.assertEqual(recs["魔法陣"]["status"], "pending")
+        self.assertEqual(len(recs["はい"]["refs"]), 2)               # 102 choice and 402 branch share one record
+        srcs = set(recs)
+        self.assertNotIn("エディタ用の名前", srcs)                     # MapInfos is editor-only
+        self.assertNotIn("イベント完了", srcs)                         # System.switches is editor-only
+        self.assertNotIn("text = ありがとう", srcs)                    # 657 is editor-only display
+        self.assertTrue(any("$gameVariables" in s for s in srcs) is False)   # 355 script never extracted
+
+    def test_full_cycle_apply_restore(self):
+        self.translate_all()
+        plan = writeback.plan(self.game, self.store, MZ)
+        self.assertEqual(plan.warnings, [])
+        writeback.commit(self.game, plan)
+        mp = json.loads((self.game / "data" / "Map001.json").read_text("utf-8"))
+        lines = [c["parameters"][0] for c in mp["events"][1]["pages"][0]["list"] if c["code"] == 401]
+        self.assertEqual(lines[:3], ["\\C[2]一丁丂七丄丅\\C[0]", "", "一丁丂\\N[1]一\\V[3]一丁丂七丄丅丆万\\{"])
+        self.assertTrue((self.game / "data" / "System.json").read_bytes().startswith(b"\xef\xbb\xbf"))
+        self.assertTrue((self.game / BACKUP_DIR / "manifest.json").exists())
+        # Re-extract after apply still sees the originals, so nothing becomes orphan.
+        extract(self.game, MZ, self.store)
+        self.assertFalse(any(r["status"] == "orphan" for r in self.store.records.values()))
+        self.assertEqual(writeback.plan(self.game, self.store, MZ).files, [])
+        results = Backup(self.game).restore()
+        self.assertTrue(all(r == "restored" for _, r in results))
+        self.assertEqual(snapshot(self.game), self.original)
+
+    def test_restore_skips_game_update(self):
+        self.translate_all()
+        writeback.commit(self.game, writeback.plan(self.game, self.store, MZ))
+        (self.game / "data" / "Skills.json").write_bytes(b'[\nnull\n]\n')     # official update
+        results = dict(Backup(self.game).restore())
+        self.assertEqual(results["data/Skills.json"], "stale")
+        self.assertEqual((self.game / "data" / "Skills.json").read_bytes(), b'[\nnull\n]\n')
+        self.assertEqual(results["data/Map001.json"], "restored")
+
+    def test_apply_refuses_changed_game(self):
+        self.translate_all()
+        (self.game / "data" / "Map001.json").write_text('{"events":[]}', "utf-8")
+        with self.assertRaises(writeback.GameChanged):
+            writeback.plan(self.game, self.store, MZ)
+
+    def test_import_rejects_broken_lines(self):
+        extract(self.game, MZ, self.store)
+        exchange.export_batches(self.store, MZ.control_codes)
+        part = next((self.store.dir / "batches" / "out").glob("part-*.jsonl"))
+        rows = [json.loads(l) for l in part.read_text("utf-8").splitlines()]
+        row = next(r for r in rows if "<0>" in r["src"])
+        bad = self.store.dir / "bad.jsonl"
+        bad.write_text(json.dumps(dict(row, dst="你好")) + "\n" + json.dumps(dict(row, id="nope", dst="x")) + "\n",
+                       "utf-8")
+        ok, rejected = exchange.import_batches(self.store, MZ.control_codes, [bad], "r")
+        self.assertEqual((ok, rejected), (0, {"placeholders": 1, "unknown_id": 1}))
+
+    def test_language_gate_stops_chinese_game(self):
+        mp = self.game / "data" / "Map001.json"
+        text = mp.read_text("utf-8")
+        for ja, zh in [("こんにちは！", "你好！这是我们的村子。"), ("今日は", "今天是"), ("回目の冒険だね。", "次冒险吧。"),
+                       ("番目の扉を開けた。", "号门打开了。"), ("遠い昔の物語。", "很久以前的故事。"),
+                       ("それは静かに始まった。", "它静静地开始了。"), ("はじまりの村", "起始之村"),
+                       ("はい", "是的"), ("いいえ", "不是"), ("ありがとう", "谢谢"), ("リリア", "莉莉娅"),
+                       ("\\\\N[1]と", "\\\\N[1]和")]:
+            text = text.replace(ja, zh)
+        mp.write_text(text, "utf-8")
+        for f in ["Actors.json", "Skills.json", "CommonEvents.json", "System.json"]:
+            (self.game / "data" / f).unlink()
+        with self.assertRaises(LanguageGateStop) as cm:
+            extract(self.game, MZ, self.store)
+        self.assertEqual(cm.exception.probe["primary"], "zh-Hans")
+
+
+if __name__ == "__main__":
+    unittest.main()
