@@ -1,0 +1,4 @@
+﻿{
+"currencyUnit":"G","elements":["","物理","炎"],"equipTypes":["","武器"],"gameTitle":"リリアの冒険","locale":"ja_JP","skillTypes":["","魔法"],"switches":["","イベント完了"],"variables":["","回数"],"weaponTypes":["","剣"],"armorTypes":["","盾"],
+"terms":{"basic":["レベル","Lv"],"commands":["戦う",null,"アイテム"],"params":["最大HP"],"messages":{"actionFailure":"%1には効かなかった！","alwaysDash":"常時ダッシュ"}}
+}
