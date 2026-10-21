@@ -2,6 +2,7 @@
 import json
 import math
 from dataclasses import asdict, dataclass, replace
+from http.client import HTTPException
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -122,7 +123,10 @@ class Sakura:
                 return json.load(response)
         except HTTPError as ex:
             # Inspect errors for classification only; never put server text/game text in logs.
-            detail = ex.read().decode("utf-8", "replace").lower()
+            try:
+                detail = ex.read().decode("utf-8", "replace").lower()
+            except HTTPException:
+                raise Transient("Sakura 連線中斷") from None
             if ex.code in (401, 403):
                 raise AuthRequired("Sakura 需要授權，進度已保留") from None
             if ex.code == 429 or ex.code >= 500:
@@ -130,7 +134,7 @@ class Sakura:
             if ex.code == 413 or (ex.code == 400 and any(x in detail for x in ("context", "too long", "too large"))):
                 raise TooLong("輸入超過 context") from None
             raise ConfigError(f"Sakura HTTP {ex.code}，請檢查模型與設定") from None
-        except (URLError, TimeoutError, OSError):
+        except (HTTPException, URLError, TimeoutError, OSError):
             raise Transient("Sakura 連線失敗或逾時") from None
         except (ValueError, UnicodeError):
             raise Transient("Sakura 回應不是有效 JSON") from None

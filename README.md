@@ -35,7 +35,7 @@ Sakura 需先自行啟動 OpenAI 相容的 llama-server（建議監聽 `127.0.0.
 
 名稱譯完會填入 `glossary.tsv` 尚未填寫的種子術語，已填的詞條保持原值。翻譯每批驗證後立即寫入日誌，記錄模型、提示詞版本、錯誤與嘗試次數；成功譯文另存專案 `cache.sqlite3`。續跑跳過已翻／已審閱／不確定的項目；一般 `failed` 可重試，模型明確拒絕的項目不自動重送。驗證失敗不寫入可疑譯文，`apply` 保留原文。Sakura 輸出維持簡體，不做繁簡轉換。
 
-MV 可直接指定遊戲目錄或 `www/`；共用 MZ 的 JSON 解析與寫回。發現 `.rpgmvp` 或加密／不支援的 JSON 即拒絕，不嘗試解密。即使只有圖片加密也會拒絕整款 MV。
+MV 可直接指定遊戲目錄或 `www/`；共用 MZ 的 JSON 解析與寫回。圖片／音訊加密不影響明文 JSON 翻譯，`.rpgmvp` 不會阻擋提取；缺少 System.json 或發現加密／不支援的 JSON 才拒絕，不嘗試解密。
 
 時間及 token 是粗估，未計重試、動態前文和新增術語的影響；`--dry-run` 不連網、不寫檔，使用保守的槽數與未解析模型名稱，快取命中數可能低於實跑。Ctrl+C 保留已提交批次；既有 HTTP 請求可能到 `--timeout` 後才結束。對話過長且單句仍超出預算時標記 `too_long`，保留原文。
 
@@ -52,7 +52,7 @@ python -X utf8 scripts/test_sakura_real.py '<日文MZ>' '<日文MV>' --output "$
 python -X utf8 scripts/audit_games.py 'G:/game' 'D:/Games/TEMP' --output "$env:TEMP/yakupatch-audit.json"
 ```
 
-真實測試只複製 `data/` 與 `js/` 到新暫存目錄，執行 extract→translate→apply→restore，檢查原始 data 與還原後副本雜湊。盤點只讀遊戲，檢查偵測、可讀 JSON 往返、語言；加密 MV 也只檢查可直接讀取的 JSON。報告不可寫入受測遊戲庫；這些腳本不啟動遊戲，也不驗證畫面或字型。測試副本保留在輸出記載的暫存路徑，供人工複核。
+真實測試只複製 `data/` 與 `js/` 到新暫存目錄，執行 extract→translate→apply→restore，檢查原始 data 與還原後副本雜湊。盤點只讀遊戲，檢查偵測、可讀 JSON 往返、語言；加密或不支援的 JSON 明確列為失敗。報告不可寫入受測遊戲庫；這些腳本不啟動遊戲，也不驗證畫面或字型。測試副本保留在輸出記載的暫存路徑，供人工複核。
 
 I1 的實際數字與失敗清單見 [交付報告](docs/I1_REPORT.md)。
 

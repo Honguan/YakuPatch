@@ -9,7 +9,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from yakupatch import engines
-from yakupatch.engines.rpgmaker_mz import RpgMakerMZ
 from yakupatch.encoding import decode, encode
 from yakupatch.extract import language_gate
 from yakupatch.fsutil import atomic_write, sha256
@@ -40,13 +39,7 @@ def audit(roots):
             item['detected'] = engines.detect(game)[0] is plugin
             if not item['detected']:
                 item['errors'].append({'stage': 'detect', 'reason': 'missing System.json/data'})
-            try:
-                files = plugin.locate(game)
-            except ValueError as ex:
-                item['errors'].append({'stage': 'unsupported', 'reason': str(ex)})
-                # Readable JSON may coexist with encrypted assets; audit bytes without attempting decryption.
-                files = RpgMakerMZ.locate(plugin, game)
-            for rel in files:
+            for rel in plugin.locate(game):
                 try:
                     raw = read_bytes(game, rel)
                     text, info = decode(raw, plugin.default_encoding)
