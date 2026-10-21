@@ -174,6 +174,20 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn('待翻 2 筆', out.getvalue())
         self.assertEqual(snapshot(self.store.dir), before)
+
+    def test_translate_reads_local_config_and_cli_overrides(self):
+        home = self.store.dir.parent.parent / 'cfg'
+        home.mkdir()
+        (home / 'config.json').write_text(json.dumps({'sakura': {'api_base': 'http://10.0.0.1:8080/v1', 'parallel': 2}}), 'utf-8')
+        seen = []
+        real = cli.Sakura
+        args = ['--home', str(self.store.dir.parent), 'translate', str(self.game), '--dry-run']
+        with patch.dict('os.environ', {'YAKUPATCH_HOME': str(home)}), \
+                patch.object(cli, 'Sakura', side_effect=lambda c: seen.append(c) or real(c)), redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(args), 0)
+            self.assertEqual(cli.main(args + ['--api-base', 'http://127.0.0.1:9/v1']), 0)
+        self.assertEqual((seen[0].api_base, seen[0].parallel), ('http://10.0.0.1:8080/v1', 2))
+        self.assertEqual((seen[1].api_base, seen[1].parallel), ('http://127.0.0.1:9/v1', 2))
         self.assertEqual(pipeline.estimate(self.store, self.codes, Fake(), 0)['items'], 0)
         with self.assertRaises(ValueError):
             pipeline.select(self.store, -1)

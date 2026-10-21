@@ -1,5 +1,6 @@
 """Command line for I0. The GUI (I2) will call the same functions."""
 import argparse
+import json
 import sys
 from collections import Counter
 from pathlib import Path
@@ -7,7 +8,7 @@ from pathlib import Path
 from . import engines, exchange, pipeline, writeback
 from .backends.sakura import Sakura, SakuraConfig
 from .backup import Backup
-from .extract import LanguageGateStop, extract, project_dir
+from .extract import LanguageGateStop, extract, project_dir, projects_home
 from .exchange import Store
 
 _LANG = {"ja": "日文", "mixed": "混合（部分已是中文）", "zh-Hans": "簡體中文", "zh-Hant": "繁體中文",
@@ -23,6 +24,12 @@ _REASON = {"placeholders": "佔位符不符", "newlines": "換行數不符", "le
 def main(argv=None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")
+    config = projects_home().parent / "config.json"
+    try:
+        sakura_defaults = json.loads(config.read_text("utf-8")).get("sakura", {}) if config.exists() else {}
+    except (ValueError, OSError, AttributeError) as ex:
+        print(f"錯誤：無法讀取設定檔 {config}：{ex}")
+        return 1
     ap = argparse.ArgumentParser(prog="yakupatch", description="遊戲文本翻譯：提取、匯出入、寫回、還原")
     ap.add_argument("--home", type=Path, help="專案資料存放位置（預設 ~/.yakupatch/projects）")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -48,6 +55,7 @@ def main(argv=None) -> int:
             p.add_argument("--force-glossary", action="store_true", help="每批附上整份術語表")
             p.add_argument("--enlarge-kana", action="store_true", help="放大小假名")
             p.add_argument("--repeat-threshold", type=int, default=20, help="重複退化偵測門檻")
+            p.set_defaults(**{k.replace("-", "_"): v for k, v in sakura_defaults.items()})  # config.json；命令列優先
         if name == "extract":
             p.add_argument("--force", action="store_true", help="遊戲已是中文仍要提取")
         if name == "import":

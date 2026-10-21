@@ -33,6 +33,12 @@ Sakura 需先自行啟動 OpenAI 相容的 llama-server（建議監聽 `127.0.0.
 
 設定使用 `translate --help` 查看：`--version`（0.9／1.0／galtransl-v1）、`--model`、`--parallel`（只能降低伺服器槽數）、`--timeout`（999 秒）、`--retries`（3，最多 5）、`--max-tokens`（1024）、`--temperature`（0.1）、`--top-p`（0.3）、`--frequency-penalty`（0.05）、`--repeat-threshold`（20）、`--force-glossary`、`--enlarge-kana`。
 
+常用設定可寫在本機設定檔 `~/.yakupatch/config.json`（有設 `YAKUPATCH_HOME` 時放在該目錄），`sakura` 底下的鍵名與上方參數相同（`-` 可寫成 `_`），命令列參數優先：
+
+```json
+{"sakura": {"api_base": "http://192.168.1.10:8080/v1"}}
+```
+
 名稱譯完會填入 `glossary.tsv` 尚未填寫的種子術語，已填的詞條保持原值。翻譯每批驗證後立即寫入日誌，記錄模型、提示詞版本、錯誤與嘗試次數；成功譯文另存專案 `cache.sqlite3`。續跑跳過已翻／已審閱／不確定的項目；一般 `failed` 可重試，模型明確拒絕的項目不自動重送。驗證失敗不寫入可疑譯文，`apply` 保留原文。Sakura 輸出維持簡體，不做繁簡轉換。
 
 MV 可直接指定遊戲目錄或 `www/`；共用 MZ 的 JSON 解析與寫回。圖片／音訊加密不影響明文 JSON 翻譯，`.rpgmvp` 不會阻擋提取；缺少 System.json 或發現加密／不支援的 JSON 才拒絕，不嘗試解密。
