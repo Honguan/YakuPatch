@@ -5,6 +5,7 @@ import sqlite3
 import unittest
 from contextlib import redirect_stdout
 from dataclasses import replace
+from http.client import IncompleteRead
 from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.error import HTTPError, URLError
@@ -130,6 +131,23 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(self.run_fake(backend)['failed'], 0)
         self.assertEqual(len(backend.calls), 1)
 
+    def test_refusal_isolated_to_one_sentence(self):
+        sources = [f'こんにちは、旅人{i}さん' for i in range(8)]
+        self.small(*sources)
+        def action(obj, temperature, n):
+            self.assertLessEqual(n, 15)  # A binary split of eight sentences has at most 15 requests.
+            if sources[3] in obj['text']:
+                raise Refused('no')
+        backend = Fake(action)
+        result = self.run_fake(backend)
+        self.assertEqual((result['translated'], result['failed']), (7, 1))
+        self.assertEqual(self.store.records['3']['errors'], ['refused'])
+        self.assertEqual(pipeline.select(self.store), [])
+        calls = len(backend.calls)
+        self.assertLessEqual(calls, 15)
+        self.assertEqual(self.run_fake(backend)['translated'], 0)
+        self.assertEqual(len(backend.calls), calls)
+
     def test_cache_revalidated_and_key_scoped(self):
         self.small('こんにちは')
         backend = Fake()
@@ -192,6 +210,19 @@ class Pipeline(unittest.TestCase):
 
 
 class SakuraClient(unittest.TestCase):
+    def test_incomplete_read_is_transient(self):
+        response = unittest.mock.MagicMock()
+        response.__enter__.return_value.read.side_effect = IncompleteRead(b'private server text', 10)
+        with self.subTest('response body'), patch('yakupatch.backends.sakura.urlopen', return_value=response):
+            with self.assertRaises(Transient) as caught:
+                Sakura().complete([])
+            self.assertNotIn('private server text', str(caught.exception))
+        error = HTTPError('http://x', 503, '', {}, response.__enter__.return_value)
+        with self.subTest('error body'), patch('yakupatch.backends.sakura.urlopen', side_effect=error):
+            with self.assertRaises(Transient) as caught:
+                Sakura().complete([])
+            self.assertNotIn('private server text', str(caught.exception))
+
     def test_settings_props_prompt_and_truncation(self):
         backend = Sakura(SakuraConfig(api_base='http://localhost:8080', parallel=9))
         with patch.object(backend, '_request', side_effect=[{}, {'total_slots': 8,
@@ -239,6 +270,8 @@ class MV(unittest.TestCase):
         self.assertEqual(len(roots), 1)
         root, plugin = roots[0]
         self.assertEqual((root, plugin.name), (www, 'rpgmaker-mv'))
+        (www / 'secret.rpgmvp').write_bytes(b'RPGMV')
+        self.assertIn('data/System.json', plugin.locate(www))
         store = Store(project_dir(root, plugin, home))
         extract(root, plugin, store)
         original = snapshot(root)
@@ -247,10 +280,6 @@ class MV(unittest.TestCase):
         writeback.commit(root, writeback.plan(root, store, plugin))
         Backup(root).restore()
         self.assertEqual(snapshot(root), original)
-        (www / 'secret.rpgmvp').write_bytes(b'RPGMV')
-        with self.assertRaisesRegex(ValueError, '加密'):
-            plugin.locate(www)
-        (www / 'secret.rpgmvp').unlink()
         (www / 'data/Actors.json').write_text('[null]', encoding='utf-16')
         self.assertIn('data/Actors.json', plugin.locate(www))
         (www / 'data/Actors.json').write_bytes(b'RPGMV\x00\x00')

@@ -161,7 +161,7 @@ def dispatch(works: list[Work], backend, terms: dict, sleep=time.sleep, cancelle
                 else:
                     sleep(2 ** attempt)
 
-    def solve(group, context=True, hot=False, refused=False):
+    def solve(group, context=True, hot=False):
         if cancelled and cancelled.is_set():
             raise CancelledError
         reason = []
@@ -180,11 +180,11 @@ def dispatch(works: list[Work], backend, terms: dict, sleep=time.sleep, cancelle
                       else "transient" if isinstance(ex, Transient) else "line_count"]
             for w in group:
                 w.errors, w.result = reason, None
-            if isinstance(ex, Transient) or (isinstance(ex, Refused) and (refused or len(group) == 1)):
+            if isinstance(ex, Transient) or (isinstance(ex, Refused) and len(group) == 1):
                 return group
         if len(group) > 1:
             mid = len(group) // 2
-            return solve(group[:mid], refused="refused" in reason) + solve(group[mid:], refused="refused" in reason)
+            return solve(group[:mid]) + solve(group[mid:])
         if context:
             return solve(group, context=False)
         if not hot and "too_long" not in reason:
