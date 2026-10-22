@@ -25,6 +25,18 @@ class Units(unittest.TestCase):
         self.assertEqual(json.loads(out)["b/c"]["d"], '中"文')
         self.assertEqual(out.replace('"中\\"文"', '"日本"'), text)
 
+    def test_plugin_command_nested_args(self):
+        args = {"messageText": "どこから？", "choices": json.dumps([json.dumps({"label": "見る", "switchId": "0"}, ensure_ascii=False)], ensure_ascii=False)}
+        text = json.dumps([{"list": [{"code": 357, "parameters": ["P", "c", "", args]}]}], ensure_ascii=False)
+        segs = {s.loc: (s.kind, s.text) for s in MZ.parse("data/CommonEvents.json", text)}
+        nested = "/0/list/0/parameters/3/choices~j/0~j/label"
+        self.assertEqual(segs, {"/0/list/0/parameters/3/messageText": ("system", "どこから？"),
+                                nested: ("system", "見る"), "/0/list/0/parameters/3/choices~j/0~j/switchId": ("other", "0")})
+        out = MZ.render("data/CommonEvents.json", text, {nested: '看"一下'})
+        choice = json.loads(json.loads(json.loads(out)[0]["list"][0]["parameters"][3]["choices"])[0])
+        self.assertEqual(choice, {"label": '看"一下', "switchId": "0"})
+        self.assertEqual(MZ.render("data/CommonEvents.json", out, {nested: "見る"}), text)
+
     def test_encoding_roundtrip(self):
         for raw in ["\ufeff{\"a\":\"あ\"}".encode("utf-8"), "あいう".encode("cp932"), "x".encode("utf-16")]:
             text, info = decode(raw)
@@ -92,7 +104,9 @@ class EndToEnd(unittest.TestCase):
         recs = {r["src"]: r for r in self.store.records.values()}
         self.assertEqual(recs["\\C[2]こんにちは！\\C[0]\n\n今日は\\N[1]と\\V[3]回目の冒険だね。\\{"]["speaker"], "リリア")
         self.assertEqual(recs["你好，这是中文。\n12345"]["status"], "skip")
-        self.assertIn("uncertain", recs["ありがとう"]["flags"])
+        self.assertEqual((recs["ありがとう"]["kind"], recs["ありがとう"]["flags"]), ("system", []))  # 357 text arg
+        self.assertIn("uncertain", recs["立ち絵_リリア"]["flags"])     # 357 file-like arg stays off by default
+        self.assertEqual(recs["見る"]["kind"], "system")               # label inside a JSON-encoded struct arg
         self.assertEqual(recs["魔法陣"]["status"], "pending")
         self.assertEqual(len(recs["はい"]["refs"]), 2)               # 102 choice and 402 branch share one record
         srcs = set(recs)

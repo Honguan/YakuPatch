@@ -841,7 +841,7 @@ docs/           使用說明、引擎支援表、遊戲規則檔與交換檔格�
 - 提取順序：先切句（E6 Segmenter）再分類（E7 Classifier），因為分類要看整段文字。
 - `refs` 為物件陣列 `[{"file","locs"}]`；日誌行格式 `{"run","id","set","old","ts"}`，`old` 供 `undo` 使用。
 - Store 以行程內鎖（`threading.RLock`）串行化寫入，未另開寫入執行緒；不防多個行程同時開同一專案。
-- 事件指令 355／655（腳本）、657（外掛參數顯示）一律不提取；357 只提取參數物件的字串值，標 `uncertain`，預設不送翻。
+- 事件指令 355／655（腳本）、657（外掛參數顯示）一律不提取；357 提取參數物件的字串值，參數本身是 JSON（結構／陣列參數）時遞迴拆開，位置以 `~j` 標記「此字串再解碼為 JSON」。鍵名含 text／message／label／title／caption／desc／help 且不含 file／image／picture／icon／sound／font／symbol／switch／variable 等字樣的標 `system` 送翻，其餘標 `uncertain`，預設不送翻。
 - I0 不提取 `js/plugins.js`。
 - 尚未實作（程式內以 `shortcut:` 註記）：容器解包、W3 自動換行、charset-normalizer 編碼偵測、備份記錄新建檔案。
 
@@ -966,7 +966,9 @@ v0.3 審查時找到的缺口。「已定案」表示設計已寫進本企劃；
 | 事件指令 102／402 | 選項清單／選項分支文字 | choice | 翻 |
 | 事件指令 320／324／325 | 變更名稱／暱稱／簡介 | name／system | 翻 |
 | 事件指令 108／408 | 註解 | — | 不提取 |
-| 事件指令 355／655、357／657 | 腳本、插件指令與其延續行（實測 657 出現 30 萬次，是第二多的指令） | other | `uncertain`（預設不翻） |
+| 事件指令 355／655、657 | 腳本與插件參數顯示行（實測 657 出現 30 萬次，是第二多的指令） | — | 不提取 |
+| 事件指令 357 | 插件指令參數（含 JSON 編碼的結構／陣列參數）；文字類鍵名 | system | 翻 |
+| 事件指令 357 | 其他鍵名（id、檔名、目的地等） | other | `uncertain`（預設不翻） |
 | 各資料庫的 `note` | 備註標籤（插件讀取的設定） | other | 不提取 |
 | `Actors.json` | `name`、`nickname`、`profile` | name／system | 翻 |
 | `Skills.json`、`Items.json`、`Weapons.json`、`Armors.json` | `name`、`description`；技能另含 `message1`、`message2` | name／system | 翻 |

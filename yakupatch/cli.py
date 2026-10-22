@@ -174,7 +174,7 @@ def _run(args) -> int:
 def _status(store: Store) -> None:
     recs = store.records.values()
     by = Counter(r["status"] for r in recs)
-    unc = sum(1 for r in recs if "uncertain" in r.get("flags", []))
+    unc = sum(1 for r in recs if r["status"] == "pending" and "uncertain" in r.get("flags", []))
     print(f"共 {len(store.records)} 句：待翻 {by['pending'] - unc}、不確定 {unc}（預設不翻）、"
           f"已翻 {by['translated']}、已審閱 {by['reviewed']}、失敗 {by['failed']}、"
           f"不翻 {by['skip']}、孤立 {by['orphan']}")
