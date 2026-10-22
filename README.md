@@ -33,7 +33,7 @@ Sakura 需先自行啟動 OpenAI 相容的 llama-server（建議監聽 `127.0.0.
 
 設定使用 `translate --help` 查看：`--version`（0.9／1.0／galtransl-v1）、`--model`、`--parallel`（只能降低伺服器槽數）、`--timeout`（999 秒）、`--retries`（3，最多 5）、`--max-tokens`（1024）、`--temperature`（0.1）、`--top-p`（0.3）、`--frequency-penalty`（0.05）、`--repeat-threshold`（20）、`--force-glossary`、`--enlarge-kana`。
 
-常用設定可寫在本機設定檔 `~/.yakupatch/config.json`（有設 `YAKUPATCH_HOME` 時放在該目錄），`sakura` 底下的鍵名與上方參數相同（`-` 可寫成 `_`），命令列參數優先：
+常用設定可寫在本機設定檔 `~/.yakupatch/config.json`（有設 `YAKUPATCH_HOME` 時放在該目錄），`sakura` 底下的鍵名與上方參數相同（`-` 可寫成 `_`），命令列參數優先。只有 `translate` 會讀這個檔；格式錯誤或有未知鍵名時 `translate` 會停下並列出可用鍵名，其他指令不受影響：
 
 ```json
 {"sakura": {"api_base": "http://192.168.1.10:8080/v1"}}
