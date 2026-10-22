@@ -59,6 +59,9 @@ class Units(unittest.TestCase):
         self.assertIn("newlines", translate.validate("あ\nい", "啊", {}))
         self.assertIn("extra_text", translate.validate("こんにちは", "翻译：你好", {}))
         self.assertIn("repetition", translate.validate("はい", "是是是是是", {}))
+        self.assertEqual(translate.validate("コンティニュー", "继续", {}), [])          # katakana loanword shrinks
+        self.assertIn("length_ratio", translate.validate("今日はいい天気ですね", "嗯", {}))
+        self.assertIn("length_ratio", translate.validate("コンティニュー", "继续" * 12, {}))
         alt, alt_masks = translate.mask("\\ct<1>番目", MZ.control_codes)
         self.assertEqual(alt, "⟦0⟧<1>番目")      # literal <1> in source switches placeholder style
 

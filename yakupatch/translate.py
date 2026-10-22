@@ -7,6 +7,7 @@ from .langdetect import KANA
 STYLES = {"<{}>": re.compile(r"<(\d+)>"), "⟦{}⟧": re.compile(r"⟦(\d+)⟧")}
 _EXTRA = re.compile(r"^\s*(翻[譯译]|译文|譯文|以下是|Translation)\s*[:：]?", re.I)
 _REPEAT = re.compile(r"(.{1,20}?)\1{3,}", re.S)
+_KATAKANA = re.compile(r"[ァ-ヺー]")
 
 
 def normalize(text: str) -> tuple[str, tuple[str, str]]:
@@ -56,7 +57,10 @@ def validate(src: str, dst: str, masks: dict[str, str], repeat_threshold: int = 
     if "\n" in src and dst.count("\n") != src.count("\n"):
         errors.append("newlines")
     plain_src, plain_dst = _plain(src, masks), _plain(dst, masks)
-    if len(plain_src) >= 4 and not 0.3 <= len(plain_dst) / len(plain_src) <= 3.0:
+    ratio = len(plain_dst) / len(plain_src) if plain_src else 1
+    # Katakana loanwords shrink a lot in Chinese (コンティニュー → 继续), so skip the lower bound for them.
+    loanword = len(_KATAKANA.findall(plain_src)) * 2 >= len(plain_src)
+    if len(plain_src) >= 4 and (ratio > 3.0 or ratio < 0.3 and not loanword):
         errors.append("length_ratio")
     if len(plain_dst) >= 4 and len(KANA.findall(plain_dst)) / len(plain_dst) > 0.3:
         errors.append("kana_residue")

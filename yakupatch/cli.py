@@ -24,12 +24,6 @@ _REASON = {"placeholders": "佔位符不符", "newlines": "換行數不符", "le
 def main(argv=None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")
-    config = projects_home().parent / "config.json"
-    try:
-        sakura_defaults = json.loads(config.read_text("utf-8")).get("sakura", {}) if config.exists() else {}
-    except (ValueError, OSError, AttributeError) as ex:
-        print(f"錯誤：無法讀取設定檔 {config}：{ex}")
-        return 1
     ap = argparse.ArgumentParser(prog="yakupatch", description="遊戲文本翻譯：提取、匯出入、寫回、還原")
     ap.add_argument("--home", type=Path, help="專案資料存放位置（預設 ~/.yakupatch/projects）")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -55,7 +49,7 @@ def main(argv=None) -> int:
             p.add_argument("--force-glossary", action="store_true", help="每批附上整份術語表")
             p.add_argument("--enlarge-kana", action="store_true", help="放大小假名")
             p.add_argument("--repeat-threshold", type=int, default=20, help="重複退化偵測門檻")
-            p.set_defaults(**{k.replace("-", "_"): v for k, v in sakura_defaults.items()})  # config.json；命令列優先
+            translate_parser = p
         if name == "extract":
             p.add_argument("--force", action="store_true", help="遊戲已是中文仍要提取")
         if name == "import":
@@ -65,6 +59,13 @@ def main(argv=None) -> int:
         if name == "undo":
             p.add_argument("run", nargs="?", help="不指定時列出可撤銷的紀錄")
     args = ap.parse_args(argv)
+    if args.cmd == "translate":                          # only translate reads config.json, so a bad file never blocks restore
+        try:
+            translate_parser.set_defaults(**_sakura_defaults(projects_home().parent / "config.json"))
+        except ValueError as ex:
+            print(f"錯誤：{ex}")
+            return 1
+        args = ap.parse_args(argv)                       # command line still wins over config.json
     try:
         return _run(args)
     except KeyboardInterrupt:
@@ -73,6 +74,24 @@ def main(argv=None) -> int:
     except (LanguageGateStop, writeback.GameChanged, ValueError, OSError, RuntimeError) as ex:
         print(f"錯誤：{ex}")
         return 1
+
+
+def _sakura_defaults(config: Path) -> dict:
+    if not config.exists():
+        return {}
+    try:
+        data = json.loads(config.read_text("utf-8"))
+    except (ValueError, OSError) as ex:
+        raise ValueError(f"無法讀取設定檔 {config}：{ex}") from ex
+    sakura = data.get("sakura", {}) if isinstance(data, dict) else None
+    if not isinstance(sakura, dict):
+        raise ValueError(f"設定檔 {config} 格式錯誤：sakura 必須是物件")
+    out = {k.replace("-", "_"): v for k, v in sakura.items()}
+    unknown = sorted(set(out) - set(SakuraConfig.__dataclass_fields__))
+    if unknown:
+        raise ValueError(f"設定檔 {config} 有未知的 sakura 設定：{', '.join(unknown)}"
+                         f"（可用：{', '.join(SakuraConfig.__dataclass_fields__)}）")
+    return out
 
 
 def _open(args) -> tuple[Path, engines.EnginePlugin, Store]:

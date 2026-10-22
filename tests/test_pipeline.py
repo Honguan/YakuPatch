@@ -188,6 +188,14 @@ class Pipeline(unittest.TestCase):
             self.assertEqual(cli.main(args + ['--api-base', 'http://127.0.0.1:9/v1']), 0)
         self.assertEqual((seen[0].api_base, seen[0].parallel), ('http://10.0.0.1:8080/v1', 2))
         self.assertEqual((seen[1].api_base, seen[1].parallel), ('http://127.0.0.1:9/v1', 2))
+        status = ['--home', str(self.store.dir.parent), 'status', str(self.game)]
+        for bad, msg in [('{"sakura": {"api-bse": "x"}}', '未知的 sakura 設定：api_bse'),
+                         ('{"sakura": []}', 'sakura 必須是物件'), ('{broken', '無法讀取設定檔')]:
+            (home / 'config.json').write_text(bad, 'utf-8')
+            with patch.dict('os.environ', {'YAKUPATCH_HOME': str(home)}), redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(cli.main(args), 1)
+                self.assertEqual(cli.main(status), 0)               # a broken config never blocks other commands
+            self.assertIn(msg, out.getvalue())
         self.assertEqual(pipeline.estimate(self.store, self.codes, Fake(), 0)['items'], 0)
         with self.assertRaises(ValueError):
             pipeline.select(self.store, -1)
