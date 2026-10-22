@@ -854,7 +854,7 @@ docs/           使用說明、引擎支援表、遊戲規則檔與交換檔格�
 - token 以每字 1.5 粗估，請求預算計入固定 prompt、術語與前文，每批最多 16 筆；時間以每波 30 秒估算，尚無 tokenizer／歷史耗時校準。`--dry-run` 離線且不寫檔；正式翻譯會讀 health／props／models 後顯示預估。Sakura 不計量，使用者執行 translate 即直接開始，不另要求確認。
 - MV 共用 MZ parse/render，`www/` 由既有根目錄搜尋處理；圖片／音訊加密不影響明文 JSON，`.rpgmvp` 不阻擋翻譯。保留 System.json 存在與逐檔 JSON 檢查；加密或不支援的 JSON 明確拒絕，不解密。
 - I1 沒有 GUI、模型自動啟停、場景摘要、自由風格、Codex/json_ids、T13 QA 或評測集；不修改 I0 的既有限制。已連線的 urllib socket 無法取消，Ctrl+C 後行程結束最多仍等到 timeout；工作執行緒不直接寫 Store。
-- 測試與真實驗收數字、未通過清單、shortcuts 及審查重點見 `docs/I1_REPORT.md`。本次驗收為日文 MV/MZ 各一款暫存副本；尚未達成原先「隨機 10 款啟動遊戲」的擴大驗收。
+- 測試與真實驗收數字、未通過清單、shortcuts 及審查重點見 `docs/I1_REPORT.md`。2026-10-23 完成實機驗收：10 款啟動、3 款還原雜湊比對通過。
 
 ---
 
@@ -894,7 +894,7 @@ docs/           使用說明、引擎支援表、遊戲規則檔與交換檔格�
 | 疊代 | 內容 | 驗收標準 |
 |---|---|---|
 | **I0 骨架** | RPG Maker MZ 單一引擎走完 A→B→C：提取、交換檔（Store 快照 + 日誌）、匯出／匯入分批檔、寫回、備份還原；安全規則；合規測試套件；CLI | MZ 通過合規測試；手填譯文匯入後遊戲可正常顯示並能還原 |
-| **I1 本地翻譯** | 部分完成：實作與 unittest 完成；MV/MZ 隨機 10 款已翻譯寫回，Chromium 載入均可進入標題與開場（`C:\YakuPatchTest\_quality\REPORT.md`）；`Game.exe` 實機啟動與還原待使用者確認 | MV/MZ 隨機 3 款可完整翻譯、啟動、還原 |
+| **I1 本地翻譯** | 完成（2026-10-23）：MV/MZ 隨機 10 款翻譯寫回，10 款以 `Game.exe` 實機啟動並顯示譯文（使用者確認）；02_mv、06_mz、10_mz restore 後 data 雜湊與原版一致，再 apply 與原譯版一致。已知問題見 `C:\YakuPatchTest\_quality\REPORT.md` | MV/MZ 隨機 3 款可完整翻譯、啟動、還原 |
 | **I2 介面 + Codex** | GUI 主要畫面；Codex 登入與後端；用量預估；撤銷整次翻譯 | 一般使用者不碰命令列即可完成全流程；Codex 額度用完時能暫停並續跑 |
 | **I3 一致性 + 文字腳本引擎** | 術語種子、外部字典（§6.10）、T13 全文 QA、`style.md`、自動換行；Ren'Py、Tyrano | 各引擎隨機 3 款實機通過；QA 能抓出刻意植入的同名異譯 |
 | **I4 封包引擎** | Unity（通用規則 + 3 種框架 + 字型替換）、KiriKiri（patch.xp3） | Unity 隨機 3 款至少 2 款可用且無方塊字；KiriKiri 未加密款可用 |
