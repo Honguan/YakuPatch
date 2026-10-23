@@ -3,7 +3,7 @@ import json
 import re
 from pathlib import Path
 
-from ..jsonspan import escape, replace_strings
+from ..jsonspan import escape, replace_strings, string_spans
 from .base import EnginePlugin, LangPack, Segment
 
 _DB_FIELDS = {
@@ -22,6 +22,11 @@ _SYSTEM_LISTS = {"elements": "name", "skillTypes": "name", "weaponTypes": "name"
 _TERM_LISTS = ("basic", "commands", "params")
 _MAP = re.compile(r"^Map\d+\.json$")
 _LANG_DIR = re.compile(r"^data[_\-]?(zh|cn|tw|chs|cht|sc|tc|chinese)", re.I)
+# 357 plugin args: struct/array args are JSON text inside a string; "~j" marks "decode this string as JSON".
+# escape() only emits ~0/~1, so ~j never occurs in a plain pointer.
+_NESTED = "~j"
+_TEXT_ARG = re.compile(r"text|message|label|title|caption|desc|help", re.I)
+_FILE_ARG = re.compile(r"file|image|picture|pict|icon|sound|bgm|bgs|font|symbol|switch|variable", re.I)
 
 
 class RpgMakerMZ(EnginePlugin):
@@ -87,7 +92,42 @@ class RpgMakerMZ(EnginePlugin):
         return out
 
     def render(self, rel: str, text: str, repl: dict[str, str]) -> str:
-        return replace_strings(text, repl)
+        return _render(text, repl)
+
+
+def _render(text: str, repl: dict[str, str]) -> str:
+    flat, nested = {}, {}
+    for loc, s in repl.items():
+        outer, sep, rest = loc.partition(_NESTED)
+        if sep:
+            nested.setdefault(outer, {})[rest] = s
+        else:
+            flat[loc] = s
+    if nested:
+        spans = string_spans(text)
+        for outer, sub in nested.items():
+            start, end = spans[outer]
+            flat[outer] = _render(json.loads(text[start:end]), sub)
+    return replace_strings(text, flat)
+
+
+def _plugin_args(out: list, loc: str, key: str, value) -> None:
+    """357 arg string; recurse into JSON-encoded struct/array args. Text-like keys are translated, the rest uncertain."""
+    if not isinstance(value, str):
+        return
+    if value.lstrip()[:1] in ("[", "{"):
+        try:
+            spans = string_spans(value)
+        except ValueError:
+            spans = None
+        if spans is not None:
+            for ptr, (start, end) in spans.items():
+                last = ptr.rsplit("/", 1)[-1]                   # array items keep the parent arg's key
+                _plugin_args(out, f"{loc}{_NESTED}{ptr}", key if last.isdigit() or not last else last,
+                             json.loads(value[start:end]))
+            return
+    text_like = _TEXT_ARG.search(key) and not _FILE_ARG.search(key)
+    _add(out, loc, "system" if text_like else "other", value)
 
 
 def _add(out: list, loc: str, kind: str, value, speaker=None, group=None) -> None:
@@ -122,8 +162,8 @@ def _commands(cmds: list, base: str) -> list[Segment]:
         elif code == 325 and len(params) > 1:            # change profile
             _add(out, f"{p}/1", "system", params[1])
         elif code == 357 and len(params) > 3 and isinstance(params[3], dict):
-            # Plugin command args: may be text or ids; E7 marks kind=other as uncertain (not translated by default).
+            # Plugin command args may be text, ids or file names; only text-like keys are translated by default.
             # 355/655 (script) and 657 (editor-only display of 357 args) are never extracted.
             for key, value in params[3].items():
-                _add(out, f"{p}/3/{escape(key)}", "other", value)
+                _plugin_args(out, f"{p}/3/{escape(key)}", key, value)
     return out

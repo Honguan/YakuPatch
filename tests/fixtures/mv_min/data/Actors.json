@@ -1,0 +1,5 @@
+[
+null,
+{"id":1,"battlerName":"Actor1_1","characterIndex":0,"characterName":"Actor1","classId":1,"equips":[1,0],"faceIndex":0,"faceName":"Actor1","traits":[],"initialLevel":1,"maxLevel":99,"name":"リリア","nickname":"見習い魔法使い","note":"<Tag: 1>","profile":"村で育った少女。\n魔法陣の研究をしている。"},
+{"id":2,"battlerName":"","characterIndex":0,"characterName":"","classId":1,"equips":[],"faceIndex":0,"faceName":"","traits":[],"initialLevel":1,"maxLevel":99,"name":"田中","nickname":"","note":"","profile":""}
+]
