@@ -41,7 +41,7 @@ def evaluate(backend, cases, size=10):
     for case, w in zip(cases, done):
         ok = w.result is not None and not w.errors
         kept = ok and all(k in w.result for k in w.masks) if w.masks else None
-        terms = case.get("terms", {})
+        terms = {k: v for k, v in case.get("terms", {}).items() if k in case["src"]}  # the speaker term need not appear
         followed = (ok and all(_T2S.convert(v) in _T2S.convert(w.result) for v in terms.values())) if terms else None
         stat = by_cat.setdefault(case["category"], Counter())
         stat["total"] += 1
