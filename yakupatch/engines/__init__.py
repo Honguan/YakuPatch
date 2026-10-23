@@ -4,8 +4,9 @@ from pathlib import Path
 from .base import EnginePlugin, LangPack, Segment
 from .rpgmaker_mz import RpgMakerMZ
 from .rpgmaker_mv import RpgMakerMV
+from .tyrano import Tyrano
 
-PLUGINS: list[EnginePlugin] = [RpgMakerMZ(), RpgMakerMV()]
+PLUGINS: list[EnginePlugin] = [RpgMakerMZ(), RpgMakerMV(), Tyrano()]
 MIN_SCORE = 0.9
 
 

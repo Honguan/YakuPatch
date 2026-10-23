@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import dicts, engines, langdetect
+from . import dicts, engines, langdetect, vfs
 from .backup import Backup
 from .encoding import decode
 from .engines import EnginePlugin, Segment
@@ -44,7 +44,8 @@ def projects_home() -> Path:
 
 def project_dir(game_dir: Path, plugin: EnginePlugin, home: Path | None = None) -> Path:
     """G1: name + fingerprint of engine and original title, so moving the folder keeps the project."""
-    title = plugin.title(game_dir, Backup(game_dir).original_bytes)
+    backup = Backup(game_dir)
+    title = plugin.title(game_dir, lambda rel: vfs.read_original(game_dir, rel, backup))
     fp = hashlib.sha256(f"{plugin.name}\0{title}".encode("utf-8")).hexdigest()[:8]
     return (home or projects_home()) / f"{game_dir.name}-{fp}"
 
@@ -54,7 +55,7 @@ def read_game(game_dir: Path, plugin: EnginePlugin) -> tuple[dict, list[tuple[st
     backup = Backup(game_dir)
     files, segments = {}, []
     for rel in plugin.locate(game_dir):                                   # E3
-        raw = backup.original_bytes(rel)                                  # E2 (loose files)
+        raw = vfs.read_original(game_dir, rel, backup)                    # E2
         text, info = decode(raw, plugin.default_encoding)                 # E4
         files[rel] = {"sha256": sha256(raw), **info}
         try:

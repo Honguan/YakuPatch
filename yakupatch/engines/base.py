@@ -31,7 +31,7 @@ class EnginePlugin:
     def language_packs(self, game_dir: Path) -> list[LangPack]:
         return []
 
-    # shortcut: loose files only; add containers() (xp3/rpa/asar...) with the first packed engine (I3/I4).
+    # Relative paths; a member of a container is "<container>!<inner>" (see vfs.py).
     def locate(self, game_dir: Path) -> list[str]:
         raise NotImplementedError
 
@@ -44,6 +44,10 @@ class EnginePlugin:
 
     def render(self, rel: str, text: str, repl: dict[str, str]) -> str:
         raise NotImplementedError
+
+    def fit(self, kind: str, text: str) -> str:
+        """Make one translated line safe for the file format (e.g. no line break inside a script line)."""
+        return text
 
     def wrap_rule(self, kind: str) -> bool:
         """W3: True when the engine does not wrap this kind itself, so long lines must be broken by us."""
