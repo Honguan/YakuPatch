@@ -14,7 +14,7 @@
 | `yakupatch/exchange.py` | Store 變更事件 `listeners`（GUI 訂閱用） |
 | `yakupatch/cli.py` | `--backend codex`、`--effort`、`--script`、`--yes`；`codex login/logout/status/models`；`undo` 列歷史；`diagnose` |
 | `tests/test_codex.py` | 11 個離線測試（假 keyring、假 opener、假 json_ids 後端） |
-| `tests/eval/cases.jsonl`、`scripts/eval_backend.py` | A7：評測集與評測腳本 |
+| `tests/eval/cases.jsonl`、`scripts/eval_backend.py` | A7：評測集與評測腳本（術語只算原文中出現者） |
 | `pyproject.toml`、`README.md`、`PROJECT_PLAN.md` | 加 `keyring` 依賴；使用說明；§15 I2 狀態 |
 
 ### 邏輯摘要
@@ -53,16 +53,27 @@ Ran 46 tests ... OK
 
 | 後端 | T11 失敗率 | 佔位符保留率 | 術語遵循率 |
 |---|---|---|---|
-| Sakura `sakura-7b-qwen2.5-v1.0-iq4xs`（遠端，`~/.yakupatch/config.json`） | 0.02（2/100） | 0.90（18/20） | 0.55（11/20） |
-| Codex | 未執行：尚未登入 | — | — |
+| Sakura `sakura-7b-qwen2.5-v1.0-iq4xs`（遠端，`~/.yakupatch/config.json`） | 0.02（2/100） | 0.90（18/20） | 0.75（15/20） |
+| Codex `gpt-6.1-sol`／effort `low`（預設：清單第一個模型） | 0.00（0/100） | 1.00（20/20） | 1.00（20/20） |
 
 - Sakura 的 2 句失敗都是佔位符錯誤（`control-00`、`control-08`），已被 T11 攔下，沒有寫入。
-- 術語錯誤主要是用字不同，例如「艾莉西亞」譯成「艾莉西娅」。
+- 術語遵循率只算原文中實際出現的術語；說話者名稱不要求出現在譯文。舊算法會把說話者也算進去，Sakura 原本 0.55、Codex 0.75，兩者都是被錯判；修正後從已存的譯文重新計分，沒有重送。
+- Sakura 的 5 個術語錯誤都是「艾莉西亞」寫成「艾莉西娅」：「娅」轉成簡體後仍然和「亞」不同。
 - 指令：`python -X utf8 scripts/eval_backend.py --backend sakura|codex --output <json>`。
 
 ### 真實測試
 
-- **Codex 3 款 MV/MZ 的 extract → 預估 → translate → apply → restore**：未執行。需要使用者先自行執行 `yakupatch codex login`，YakuPatch 不代為輸入帳密。
+使用者自行執行 `yakupatch codex login` 登入後，從盤點結果中「日文、無錯誤、片段數少於 3000」的 6 款裡，用 seed 20261023 隨機抽 3 款。來源唯讀，只複製 `data`、`js` 到暫存副本，依序跑 extract → 預估 → translate → apply → 重複 apply（應無變更）→ restore。後端為 Codex 預設（`gpt-6.1-sol`、effort `low`、一次 4 批）。
+
+| 引擎 | 遊戲 | 記錄 | 待翻 | 成功 | 失敗 | 預估批次／秒 | 全流程秒數 | 寫回檔／處 | 還原雜湊／來源 data 雜湊 |
+|---|---|---|---|---|---|---|---|---|---|
+| MZ | （路徑略） | 962 | 365 | 365 | 0 | 17／150 | 90.4 | 15／508 | 一致／一致 |
+| MV | （路徑略） | 325 | 310 | 310 | 0 | 14／120 | 62.6 | 12／717 | 一致／一致 |
+| MV | （路徑略） | 553 | 538 | 537 | 1（`repetition`） | 21／180 | 313.0 | 12／1851 | 一致／一致 |
+
+- 3 款共 1,213 筆待翻，成功 1,212 筆，失敗的 1 筆保留原文。
+- 速度約每秒 2–5 句（含提取／寫回／還原）。I1 的 Sakura 實測只算翻譯時間，約每秒 1.6 句。
+- 機器報告在 session scratchpad 的 `real_codex.json`（未提交）。
 - **額度用完暫停續跑**：以 mock 證明（`test_usage_limit_pauses_and_resume_continues`），沒有刻意耗盡真實額度。
 
 ### 新增 shortcut 與已知限制
@@ -75,7 +86,6 @@ Ran 46 tests ... OK
 
 ### 未完成
 
-- Codex 實跑評測與 3 款實機驗收：等使用者登入。
 - 階段 B GUI：尚未開始。
 
 ### Commit
