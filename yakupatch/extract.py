@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import engines, langdetect
+from . import dicts, engines, langdetect
 from .backup import Backup
 from .encoding import decode
 from .engines import EnginePlugin, Segment
@@ -152,7 +152,8 @@ def _id(records: dict, kind: str, text: str) -> str:
 
 
 def seed_glossary(project: Path, records: dict[str, dict]) -> None:
-    """E10: names and speakers become glossary candidates; existing rows are never overwritten."""
+    """E10: names and speakers become glossary candidates; existing rows are never overwritten.
+    Local dictionaries (§6.10) add readings and existing Chinese names as unconfirmed `dict:` suggestions."""
     path = project / "glossary.tsv"
     rows = {}
     if path.exists():
@@ -162,7 +163,7 @@ def seed_glossary(project: Path, records: dict[str, dict]) -> None:
     for rec in records.values():
         for term in (rec["src"] if rec["kind"] == "name" and rec["status"] == "pending" else None, rec["speaker"]):
             if term and "\t" not in term and "\n" not in term and term not in rows:
-                rows[term] = f"{term}\t\t\tseed"
+                rows[term] = "\t".join((term, *(dicts.suggest(term) or ("", "", "seed"))))
     body = "src\tdst\tnote\tsource\n" + "".join(r + "\n" for r in rows.values())
     atomic_write(path, body.encode("utf-8"))
 

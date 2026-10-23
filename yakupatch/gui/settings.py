@@ -4,10 +4,10 @@ from dataclasses import fields
 from pathlib import Path
 
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog,
-                               QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox,
-                               QTabWidget, QVBoxLayout, QWidget)
+                               QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton,
+                               QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
 
-from .. import core
+from .. import core, dicts
 from ..backends import codex
 from ..backends.codex import Codex, Credentials
 from ..backends.sakura import Sakura, SakuraConfig
@@ -34,6 +34,7 @@ class SettingsDialog(QDialog):
         tabs.addTab(self._sakura(), tr("Sakura"))
         tabs.addTab(self._codex(), tr("Codex（實驗性）"))
         tabs.addTab(self._advanced(), tr("進階"))
+        tabs.addTab(self._dicts(), tr("字典"))
         tabs.setCurrentIndex(tab)
         box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Close)
         box.accepted.connect(self.save)
@@ -159,6 +160,79 @@ class SettingsDialog(QDialog):
         return {**self.config.get("codex", {}), "model": self.model.currentText().strip(),
                 "effort": self.effort.currentText().strip(), "parallel": self.parallel.value(),
                 "output_script": self.script.currentData(), "privacy_ack": self.privacy.isChecked()}
+
+    # ---------- dictionaries (§6.10) ----------
+    def _dicts(self):
+        w = QWidget()
+        v = QVBoxLayout(w)
+        self.dict_table = QTableWidget(0, 5)
+        self.dict_table.setHorizontalHeaderLabels([tr(s) for s in ("字典", "授權", "狀態", "筆數", "更新日期")])
+        self.dict_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.dict_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.dict_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        v.addWidget(self.dict_table)
+        row = QHBoxLayout()
+        for text, slot in ((tr("下載／更新"), self.dict_download), (tr("刪除"), self.dict_remove),
+                           (tr("匯入自備詞庫（CSV／TSV／JSON）"), self.dict_import)):
+            row.addWidget(QPushButton(text, clicked=slot))
+        v.addLayout(row)
+        credits = QLabel("\n".join(f"・{s['title']}（{s['license']}）：{s['credit']}" for s in dicts.SOURCES.values()),
+                         wordWrap=True)
+        credits.setStyleSheet("color: #666")
+        v.addWidget(QLabel(tr("字典資料不隨程式散佈，只在你按下下載或查詢時才連線取得；譯名一律需人工確認。")))
+        v.addWidget(credits)
+        self.load_dicts()
+        return w
+
+    def load_dicts(self):
+        self.dict_rows = dicts.info()
+        self.dict_table.setRowCount(0)
+        for d in self.dict_rows:
+            n = self.dict_table.rowCount()
+            self.dict_table.insertRow(n)
+            state = tr("已安裝") if d["installed"] else (tr("未下載") if d["name"] in dicts.DOWNLOADABLE else tr("查詢後建立"))
+            for col, value in enumerate((d["title"], d["license"], state, str(d["entries"] or ""), d["date"])):
+                self.dict_table.setItem(n, col, QTableWidgetItem(value))
+
+    def _dict_selected(self):
+        rows = self.dict_table.selectionModel().selectedRows()
+        return self.dict_rows[rows[0].row()]["name"] if rows else None
+
+    def dict_download(self):
+        name = self._dict_selected()
+        if name not in dicts.DOWNLOADABLE:
+            QMessageBox.information(self, "YakuPatch", tr("請選擇 JMnedict 或 Japanese Personal Name Dataset。"
+                                                          "VNDB 與 Wikidata 在術語分頁依遊戲查詢。"))
+            return
+        if QMessageBox.question(self, "YakuPatch", tr("從官方來源下載「{}」並轉成本地詞庫？").format(
+                dicts.SOURCES[name]["title"])) != QMessageBox.Yes:
+            return
+
+        def done(job):
+            if job.error:
+                QMessageBox.warning(self, "YakuPatch", tr("下載失敗：{}").format(job.error))
+            self.load_dicts()
+
+        self.window_.run_bg(lambda job: dicts.download(name), done, tr("下載字典"))
+
+    def dict_remove(self):
+        name = self._dict_selected()
+        if name and QMessageBox.question(self, "YakuPatch", tr("刪除本地的「{}」？").format(
+                dicts.SOURCES[name]["title"])) == QMessageBox.Yes:
+            dicts.remove(name)
+            self.load_dicts()
+
+    def dict_import(self):
+        path, _ = QFileDialog.getOpenFileName(self, tr("匯入自備詞庫"), "", "CSV / TSV / JSON (*.csv *.tsv *.txt *.json)")
+        if not path:
+            return
+        try:
+            n = dicts.import_user(Path(path))
+        except (OSError, ValueError, UnicodeError) as ex:
+            QMessageBox.warning(self, "YakuPatch", tr("匯入失敗：{}").format(ex))
+            return
+        QMessageBox.information(self, "YakuPatch", tr("已匯入 {} 筆").format(n))
+        self.load_dicts()
 
     # ---------- advanced ----------
     def _advanced(self):
