@@ -35,6 +35,7 @@ class Store:
         self.records: dict[str, dict] = {}
         self._journal_lines = 0
         self.listeners: list = []      # fn(ids | None) after each write; None = everything may have changed
+        self.busy = False              # a translation job is running (core.translate); the glossary is read-only
         if (self.dir / "manifest.json").exists():
             self.manifest = json.loads((self.dir / "manifest.json").read_text("utf-8"))
         if (self.dir / "strings.jsonl").exists():
