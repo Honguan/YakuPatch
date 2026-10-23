@@ -118,7 +118,7 @@ class Gui(unittest.TestCase):
                 return super().complete(messages, temperature)
 
         with patch.object(MainWindow, "make_backend", lambda self: (Slow(), "sakura")):
-            win.start_translation()
+            win.start_button.click()                            # the real button: clicked(bool) must not reach `only`
             self.assertTrue(wait(lambda: win.translation and win.translation[0].state == "running"))
             first = win.translation[0]
             win.tabs.setCurrentIndex(1)                         # browsing and editing stay responsive meanwhile

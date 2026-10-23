@@ -65,7 +65,7 @@ class MainWindow(QMainWindow):
         bar.addWidget(spacer)
         self.backend_label = QLabel(tr("後端：未連線"))
         bar.addWidget(self.backend_label)
-        bar.addAction(QAction(tr("設定"), self, triggered=self.open_settings))
+        bar.addAction(QAction(tr("設定"), self, triggered=lambda: self.open_settings()))
 
         left = QWidget()
         lv = QVBoxLayout(left)
@@ -246,7 +246,7 @@ class MainWindow(QMainWindow):
         form.addRow(tr("範圍"), scope)
         v.addLayout(form)
         ctl = QHBoxLayout()
-        self.start_button = QPushButton(tr("開始翻譯"), clicked=self.start_translation)
+        self.start_button = QPushButton(tr("開始翻譯"), clicked=lambda: self.start_translation())
         self.pause_button = QPushButton(tr("暫停"), clicked=self.pause_job)
         self.resume_button = QPushButton(tr("繼續"), clicked=self.resume_job)
         self.cancel_button = QPushButton(tr("取消"), clicked=self.cancel_job)
