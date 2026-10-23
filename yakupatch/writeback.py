@@ -1,5 +1,7 @@
 """Writeback pipeline W1–W7 (PROJECT_PLAN §7). All files succeed or everything is rolled back."""
+import re
 import shutil
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -43,6 +45,8 @@ def plan(game_dir: Path, store: Store, plugin: EnginePlugin) -> ApplyPlan:
         else:
             raise GameChanged(f"遊戲檔案已變動，請先重新提取：{rel}")
     repl: dict[str, dict[str, str]] = {rel: {} for rel in infos}
+    limits = wrap_limits(store, plugin)
+    codes = re.compile("|".join(plugin.control_codes)) if plugin.control_codes else None
     for rec in store.records.values():                                   # W2
         if rec["status"] not in ("translated", "reviewed") or not rec.get("dst"):
             continue
@@ -57,7 +61,8 @@ def plan(game_dir: Path, store: Store, plugin: EnginePlugin) -> ApplyPlan:
             except UnicodeEncodeError:
                 result.warnings.append(f"{rec['id']} 無法以 {infos[ref['file']]['encoding']} 編碼，保留原文")
                 continue
-            # shortcut: no W3 LineWrapper yet; message lines are kept as translated (I3).
+            if rec["kind"] in limits:                                    # W3
+                parts = [wrap(p, limits[rec["kind"]], codes) for p in parts]
             repl[ref["file"]].update(zip(ref["locs"], parts))
     for rel, info in infos.items():
         text, _ = decode(originals[rel], plugin.default_encoding)
@@ -67,6 +72,50 @@ def plan(game_dir: Path, store: Store, plugin: EnginePlugin) -> ApplyPlan:
         if new != read_bytes(game_dir, rel):
             result.files.append(FilePlan(rel, originals[rel], new, len(repl[rel])))
     return result
+
+
+def width(text: str, codes=None) -> float:
+    """Display width: full-width and ambiguous characters 1, half-width 0.5; control codes take no room."""
+    text = codes.sub("", text) if codes else text
+    return sum(1 if unicodedata.east_asian_width(c) in "FWA" else 0.5 for c in text)
+
+
+def wrap_limits(store: Store, plugin: EnginePlugin) -> dict[str, float]:
+    """The game's own line width per kind (99th percentile of source lines), for kinds the engine does not wrap."""
+    codes = re.compile("|".join(plugin.control_codes)) if plugin.control_codes else None
+    lines: dict[str, list[float]] = {}
+    for rec in store.records.values():
+        if plugin.wrap_rule(rec["kind"]):
+            lines.setdefault(rec["kind"], []).extend(width(s, codes) for s in rec["src"].split("\n"))
+    out = {}
+    for kind, ws in lines.items():
+        if len(ws) >= 20:                     # too few lines to learn the window width from
+            ws.sort()
+            out[kind] = max(8.0, ws[int(len(ws) * 0.99) - 1])
+    return out
+
+
+_CLOSE = set("、。，．・：；？！ー…‥」』）】〉》〕］｝〟’”!?,.)]}")
+
+
+def wrap(line: str, limit: float, codes=None) -> str:
+    """W3: insert "\\n" so no line is wider than `limit`; never inside a control code; closing punctuation hangs."""
+    if width(line, codes) <= limit:
+        return line
+    tokens, pos = [], 0
+    for m in (codes.finditer(line) if codes else []):
+        tokens += list(line[pos:m.start()]) + [m.group(0)]
+        pos = m.end()
+    tokens += list(line[pos:])
+    out, cur = [], 0.0
+    for tok in tokens:
+        w = 0 if codes and codes.fullmatch(tok) else width(tok)
+        if w and cur + w > limit and cur and tok not in _CLOSE:
+            out.append("\n")
+            cur = 0.0
+        out.append(tok)
+        cur += w
+    return "".join(out)
 
 
 def _verify(plugin: EnginePlugin, rel: str, text: str, new_text: str, repl: dict[str, str]) -> None:

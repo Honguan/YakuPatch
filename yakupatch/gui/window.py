@@ -8,7 +8,7 @@ from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QComboBox, QFileDialog, QFormLayout, QGridLayout,
                                QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-                               QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton, QRadioButton, QSizePolicy,
+                               QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSizePolicy,
                                QSpinBox, QSplitter, QTableView, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
                                QWidget)
 
@@ -23,6 +23,19 @@ from .settings import SettingsDialog
 
 STEPS = ["①偵測", "②語言預檢", "③提取", "④翻譯", "⑤寫回"]
 NEEDS_USER = (AuthRequired, UsageLimit, ConfigError)
+
+
+def qa_text(reason: str, store) -> str:
+    """T13 reasons (qa.check) in words."""
+    kind, _, arg = reason.partition(":")
+    if kind == "term":
+        return tr("含術語「{}」卻未使用指定譯名").format(arg)
+    if kind == "variant":
+        other = store.records.get(arg)
+        return tr("與相同原文的另一句譯法差異大：{}").format((other or {}).get("dst", arg).replace("\n", " "))
+    if kind == "gap":
+        return tr("前後句都已翻，此句未翻")
+    return reason
 
 
 class Bridge(QObject):
@@ -146,7 +159,7 @@ class MainWindow(QMainWindow):
         for k, name in KIND.items():
             self.f_kind.addItem(tr(name), k)
         self.f_flag.addItem(tr("旗標：全部"), "")
-        for k, name in (("failed", "失敗"), ("long", "超長"), ("uncertain", "不確定")):
+        for k, name in (("failed", "失敗"), ("long", "超長"), ("uncertain", "不確定"), ("inconsistent", "不一致")):
             self.f_flag.addItem(tr(name), k)
         self.query = QLineEdit(placeholderText=tr("搜尋原文或譯文"))
         self.count_label = QLabel()
@@ -186,7 +199,8 @@ class MainWindow(QMainWindow):
                                 (tr("重翻此句"), self.retranslate_current, "F5"),
                                 (tr("標為已審閱"), self.mark_reviewed, None),
                                 (tr("套用到相同原文"), self.apply_same, None),
-                                (tr("重翻選取"), self.retranslate_selected, None)):
+                                (tr("重翻選取"), self.retranslate_selected, None),
+                                (tr("全文 QA"), self.run_qa, None)):
             b = QPushButton(text, clicked=slot)
             if key:
                 b.setShortcut(QKeySequence(key))
@@ -216,7 +230,14 @@ class MainWindow(QMainWindow):
                            (tr("重新載入"), self.load_glossary), (tr("儲存"), self.save_glossary)):
             row.addWidget(QPushButton(text, clicked=slot))
         v.addLayout(row)
-        v.addWidget(QLabel(tr("翻譯進行中術語表為唯讀。字典查詢於 I3 提供。")))
+        v.addWidget(QLabel(tr("翻譯進行中術語表為唯讀。")))
+        style = QGroupBox(tr("翻譯風格 style.md（人稱、敬語、語氣、專有名詞規則；只有 Codex 會使用）"))
+        s = QVBoxLayout(style)
+        self.style_edit = QPlainTextEdit(placeholderText=tr("例如：主角自稱「我」；女主角稱呼主角「哥哥」；語氣輕鬆。"))
+        self.style_edit.setMaximumHeight(120)
+        s.addWidget(self.style_edit)
+        s.addWidget(QPushButton(tr("儲存風格"), clicked=self.save_style), 0, Qt.AlignRight)
+        v.addWidget(style)
         return w
 
     def _translate(self):
@@ -540,7 +561,9 @@ class MainWindow(QMainWindow):
         self.ctx_label.setText(" ／ ".join(p.replace("\n", " ") for p in prev) or "—")
         self.editor.setPlainText(dst)
         errs = [_REASON.get(e, e) for e in rec.get("errors", [])]
-        self.edit_error.setText(tr("錯誤：") + "、".join(errs) if errs else "")
+        notes = [qa_text(q, store) for q in rec.get("qa", [])]
+        self.edit_error.setText("\n".join(([tr("錯誤：") + "、".join(errs)] if errs else []) +
+                                          ([tr("不一致：") + "；".join(notes)] if notes else [])))
         refs = rec["refs"]
         self.refs_label.setText(tr("出現位置：{} 等 {} 處").format(refs[0]["file"], len(refs)) if refs else "")
 
@@ -578,6 +601,14 @@ class MainWindow(QMainWindow):
         if ids:
             self.start_translation(only=ids, fresh=True)
 
+    def run_qa(self):
+        if not self.key:
+            return
+        n = core.qa(self.current[2])
+        self.f_flag.setCurrentIndex(self.f_flag.findData("inconsistent") if n else 0)
+        self._filter(flag=self.f_flag.currentData() or "")
+        self.statusBar().showMessage(tr("全文 QA：{} 句不一致").format(n), 8000)
+
     # ---------- glossary tab ----------
     def load_glossary(self):
         if not self.key:
@@ -586,6 +617,12 @@ class MainWindow(QMainWindow):
         self.gloss.setRowCount(0)
         for r in rows:
             self._gloss_row(r)
+        self.style_edit.setPlainText(core.style(self.current[2]))
+
+    def save_style(self):
+        if self.key:
+            core.save_style(self.current[2], self.style_edit.toPlainText())
+            self.statusBar().showMessage(tr("翻譯風格已儲存"), 5000)
 
     def _gloss_row(self, r):
         n = self.gloss.rowCount()

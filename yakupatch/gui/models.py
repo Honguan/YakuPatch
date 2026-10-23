@@ -123,6 +123,8 @@ class TextFilter(QSortFilterProxyModel):
             return False
         if self.flag == "failed" and rec["status"] != "failed":
             return False
+        if self.flag == "inconsistent" and "inconsistent" not in rec.get("flags", []):
+            return False
         q = self.query
         return not q or q in rec["src"] or q in (rec.get("dst") or "")
 

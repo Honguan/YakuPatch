@@ -233,6 +233,7 @@ class Codex:
         self.models: dict[str, list[str]] = {}
         self.cache_key = secrets.token_hex(16)   # one prompt_cache_key per translation job
         self._open = opener
+        self.style = ""                          # style.md (F18), set per job by pipeline.use_style
         self.caps = BackendCaps(io_format="json_ids", max_input_tokens=config.max_input_tokens, max_items=config.max_items,
                                 max_parallel=config.parallel, output_script=config.output_script, summary=True,
                                 style=True, metered=True)
@@ -246,7 +247,7 @@ class Codex:
         cfg = asdict(self.config)
         for key in ("parallel", "timeout", "retries"):   # do not change the translation
             cfg.pop(key)
-        return {"by": self.by, "config": cfg}
+        return {"by": self.by, "config": cfg, "style": self.style}
 
     def account(self) -> dict:
         data = self.credentials.load()
@@ -283,7 +284,8 @@ class Codex:
                 "context": works[0].context if context else [],
                 "items": [{"id": str(i), "text": w.text, **({"speaker": w.speaker} if w.speaker else {})}
                           for i, w in enumerate(works)]}
-        return [{"role": "system", "content": INSTRUCTIONS[self.config.output_script] + "\n" + RULES},
+        style = f"\n翻譯風格（使用者指定；與上面規則衝突時以規則為準）：\n{self.style}" if self.style else ""
+        return [{"role": "system", "content": INSTRUCTIONS[self.config.output_script] + "\n" + RULES + style},
                 {"role": "user", "content": json.dumps(body, ensure_ascii=False)}]
 
     def complete(self, messages, temperature=None):

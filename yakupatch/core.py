@@ -155,6 +155,20 @@ def save_glossary(store: Store, rows: list[list[str]]) -> None:
     atomic_write(store.dir / "glossary.tsv", body.encode("utf-8"))
 
 
+def qa(store: Store) -> int:
+    """T13 on demand (after manual edits or imports); returns the number of flagged sentences."""
+    return pipeline.qa.check(store, {s: d for s, (d, _) in pipeline.glossary(store).items()})
+
+
+def style(store: Store) -> str:
+    return pipeline.style(store)
+
+
+def save_style(store: Store, text: str) -> None:
+    """F18 style.md: free-form rules sent to backends that follow them (Codex)."""
+    atomic_write(store.dir / "style.md", (text.strip() + "\n" if text.strip() else "").encode("utf-8"))
+
+
 def launch(game: Path) -> None:
     """MV keeps Game.exe next to www/, MZ inside the game folder."""
     exe = next((d / "Game.exe" for d in (game, game.parent) if (d / "Game.exe").is_file()), None)
@@ -278,6 +292,8 @@ def history(store: Store) -> list[dict]:
     """One row per translation/import run (F21), oldest first. Undo runs are listed as `undo-<run>`."""
     rows: dict[str, dict] = {}
     for e in store._all_entries():
+        if e["run"].startswith(("qa-", "undo-qa-")):     # QA flag passes are not translation runs
+            continue
         row = rows.setdefault(e["run"], {"run": e["run"], "time": e.get("ts", 0), "by": "", "items": 0,
                                          "translated": 0, "failed": 0})
         row["items"] += 1
