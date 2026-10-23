@@ -49,7 +49,8 @@ def project_dir(game_dir: Path, plugin: EnginePlugin, home: Path | None = None) 
     return (home or projects_home()) / f"{game_dir.name}-{fp}"
 
 
-def extract(game_dir: Path, plugin: EnginePlugin, store: Store, force: bool = False) -> dict:
+def read_game(game_dir: Path, plugin: EnginePlugin) -> tuple[dict, list[tuple[str, Segment]]]:
+    """E2–E5 without writing anything; also used by the GUI library's language label."""
     backup = Backup(game_dir)
     files, segments = {}, []
     for rel in plugin.locate(game_dir):                                   # E3
@@ -60,11 +61,23 @@ def extract(game_dir: Path, plugin: EnginePlugin, store: Store, force: bool = Fa
             segments += [(rel, s) for s in plugin.parse(rel, text)]      # E5
         except (ValueError, json.JSONDecodeError) as ex:
             raise ValueError(f"無法解析 {rel}（可能已加密，不支援）：{ex}") from None
-    probe = language_gate([s for _, s in segments])                      # L1
+    return files, segments
+
+
+def probe(game_dir: Path, plugin: EnginePlugin, segments: list[tuple[str, Segment]] | None = None) -> tuple[dict, list]:
+    if segments is None:
+        segments = read_game(game_dir, plugin)[1]
+    result = language_gate([s for _, s in segments])                     # L1
     packs = plugin.language_packs(game_dir)
-    probe["packs"] = [p.path for p in packs]
-    if not force and (probe["primary"].startswith("zh") or packs):
-        raise LanguageGateStop(probe, packs)
+    result["packs"] = [p.path for p in packs]
+    return result, packs
+
+
+def extract(game_dir: Path, plugin: EnginePlugin, store: Store, force: bool = False) -> dict:
+    files, segments = read_game(game_dir, plugin)
+    lang, packs = probe(game_dir, plugin, segments)
+    if not force and (lang["primary"].startswith("zh") or packs):
+        raise LanguageGateStop(lang, packs)
     units = [u for rel in files for u in segment(rel, [s for r, s in segments if r == rel])]  # E6
     for u in units:
         u.status, u.flags = classify(u)                                  # E7
@@ -72,9 +85,9 @@ def extract(game_dir: Path, plugin: EnginePlugin, store: Store, force: bool = Fa
     seed_glossary(store.dir, records)                                     # E10
     manifest = {"format": FORMAT, "game_dir": str(game_dir), "engine": plugin.name,
                 "plugin_version": plugin.version, "source_lang": "ja", "target_lang": "",
-                "language_probe": probe, "files": files}
+                "language_probe": lang, "files": files}
     store.replace(merge(store.records, records), {**store.manifest, **manifest})   # E11
-    return probe
+    return lang
 
 
 def language_gate(segments: list[Segment]) -> dict:

@@ -9,13 +9,16 @@ description = "Translate game text by patching game files directly, with backup 
 readme = "README.md"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
-dependencies = ["opencc-python-reimplemented>=0.1.7", "keyring>=24"]
+dependencies = ["opencc-python-reimplemented>=0.1.7", "keyring>=24", "PySide6>=6.7"]
 
 [project.urls]
 Repository = "https://github.com/Honguan/YakuPatch"
 
 [project.scripts]
 yakupatch = "yakupatch.cli:main"
+
+[project.gui-scripts]
+yakupatch-gui = "yakupatch.gui:main"
 
 [tool.setuptools.packages.find]
 include = ["yakupatch*"]
