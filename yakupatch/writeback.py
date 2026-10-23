@@ -6,12 +6,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import vfs
-from .backup import Backup, read_head, write_head
-from .encoding import decode, encode
+from .backup import Backup, read_head, remove_created, write_head
+from .encoding import encode
 from .engines import EnginePlugin
 from .exchange import Store
 from .fsutil import atomic_write, sha256
-from .safety import safe_path
+from .safety import read_bytes, safe_path
 
 
 class GameChanged(Exception):
@@ -66,9 +66,19 @@ def plan(game_dir: Path, store: Store, plugin: EnginePlugin) -> ApplyPlan:
                 parts = [wrap(p, limits[rec["kind"]], codes) for p in parts]
             parts = [plugin.fit(rec["kind"], p) for p in parts]
             repl[ref["file"]].update(zip(ref["locs"], parts))
+    texts = {rel: plugin.decode(rel, originals[rel])[0] for rel in infos}
+    outputs = plugin.outputs(texts, {rel: r for rel, r in repl.items() if r})
+    if outputs is not None:                       # new files beside the game; the originals stay untouched
+        for rel in sorted(set(outputs) | {r for r in backup.files if backup.is_created(r)}):
+            data, n = outputs.get(rel, (None, 0))
+            current = read_bytes(game_dir, rel) if safe_path(game_dir, rel).exists() else None
+            if data != current:
+                result.files.append(FilePlan(rel, current or b"", data or b"", n))
+                result.writes[rel] = (data, False)
+        return result
     news = {}
     for rel, info in infos.items():
-        text, _ = decode(originals[rel], plugin.default_encoding)
+        text = texts[rel]
         new_text = plugin.render(rel, text, repl[rel])                   # W5
         _verify(plugin, rel, text, new_text, repl[rel])                  # W6
         news[rel] = encode(new_text, info)
@@ -152,9 +162,9 @@ def commit(game_dir: Path, apply: ApplyPlan) -> None:                    # W7
                 backup.set_patched(rel, data)
                 continue
             before = path.read_bytes() if path.exists() else None
-            if data is None:                                             # an unpacked copy no longer needed
+            if data is None:                                             # a file we added, no longer needed
                 done.append((path, before, False))
-                path.unlink(missing_ok=True)
+                remove_created(path)
                 backup.drop(rel)
                 continue
             if before is None or backup.is_created(rel):

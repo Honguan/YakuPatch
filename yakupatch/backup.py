@@ -27,6 +27,13 @@ def write_head(path: Path, data: bytes) -> None:
         os.fsync(f.fileno())
 
 
+def remove_created(path: Path) -> None:
+    """Delete a file we added, and the .rpyc Ren'Py compiles next to an added .rpy (it would still load alone)."""
+    path.unlink(missing_ok=True)
+    if path.suffix == ".rpy":
+        path.with_name(path.name + "c").unlink(missing_ok=True)
+
+
 class Backup:
     def __init__(self, game_dir: Path):
         self.game = Path(game_dir)
@@ -87,7 +94,7 @@ class Backup:
                 if current is None:
                     results.append((rel, "original"))
                 elif current == e["patched_sha"]:
-                    path.unlink()
+                    remove_created(path)
                     _prune(path.parent, self.game)
                     results.append((rel, "removed"))
                 else:
