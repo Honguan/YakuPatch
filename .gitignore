@@ -4,3 +4,23 @@ build/
 dist/
 .yakupatch-tmp
 _yakupatch_backup/
+
+# Local config and credentials (Sakura address, tokens): never commit
+.yakupatch/
+config.json
+.env
+.env.*
+auth.json
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Outputs that may contain game text, paths or account info
+projects/
+diagnostics*.zip
+eval_*.json
+real_*.json
+audit*.json
+*.log
+*.bak
