@@ -10,7 +10,7 @@ from contextlib import closing
 from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
-from . import translate
+from . import qa, translate
 from .backends import ConfigError, Refused, TooLong, Transient
 from .exchange import Store, new_run, selectable
 from .fsutil import atomic_write
@@ -48,6 +48,17 @@ def glossary(store: Store) -> dict:
     path = store.dir / "glossary.tsv"
     rows = [line.split("\t") for line in path.read_text("utf-8").splitlines()[1:]] if path.exists() else []
     return {r[0]: (r[1], r[2] if len(r) > 2 else "") for r in rows if len(r) > 1 and r[1]}
+
+
+def style(store: Store) -> str:
+    """F18: per-game style.md; only backends with caps.style receive it."""
+    path = store.dir / "style.md"
+    return path.read_text("utf-8").strip() if path.exists() else ""
+
+
+def use_style(store: Store, backend) -> None:
+    if backend.caps.style:
+        backend.style = style(store)
 
 
 def update_glossary(store: Store) -> None:
@@ -124,6 +135,7 @@ def cache_get(store: Store, key: str) -> str | None:
 def estimate(store: Store, codes: list[str], backend, limit=None, only=None, fresh=False) -> dict:
     rows = select(store, limit, only)
     terms = glossary(store)
+    use_style(store, backend)
     works = work_list(store, rows, codes, terms)
     hits = 0 if fresh else sum(cache_get(store, cache_key(w, backend, terms)) is not None for w in works)
     pending = works if fresh else [w for w in works if cache_get(store, cache_key(w, backend, terms)) is None]
@@ -227,6 +239,7 @@ def run(store: Store, codes: list[str], backend, limit=None, progress=None, slee
     if backend.caps.io_format not in ("lines", "json_ids"):
         raise ConfigError(f"不支援的後端輸出格式：{backend.caps.io_format}")
     rows = select(store, limit, only)
+    use_style(store, backend)
     run_id = new_run()
     stats = {"run": run_id, "total": len(rows), "translated": 0, "failed": 0, "cached": 0, "errors": Counter(),
              "stopped": False}
@@ -301,6 +314,7 @@ def run(store: Store, codes: list[str], backend, limit=None, progress=None, slee
             pool.shutdown(wait=False, cancel_futures=True)
         if stats["stopped"]:
             break
+    stats["inconsistent"] = qa.check(store, {s: d for s, (d, _) in glossary(store).items()}, f"qa-{run_id}")   # T13
     stats["seconds"] = round(time.monotonic() - started, 3)
     stats["errors"] = dict(stats["errors"])
     return stats

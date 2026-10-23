@@ -44,3 +44,7 @@ class EnginePlugin:
 
     def render(self, rel: str, text: str, repl: dict[str, str]) -> str:
         raise NotImplementedError
+
+    def wrap_rule(self, kind: str) -> bool:
+        """W3: True when the engine does not wrap this kind itself, so long lines must be broken by us."""
+        return False
