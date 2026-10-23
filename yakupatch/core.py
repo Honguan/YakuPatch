@@ -1,15 +1,24 @@
 """Core API shared by the CLI and the GUI (PROJECT_PLAN §3.4, §11.12): the GUI never reads or writes project/game files itself."""
 import json
+import os
 import platform
+import subprocess
 import threading
 import zipfile
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-from . import __version__, engines, pipeline
-from .exchange import Store
-from .extract import project_dir
+from . import __version__, engines, exchange, extract as extraction, pipeline, translate as text, writeback
+from .backends.codex import CodexConfig
+from .backends.sakura import SakuraConfig
+from .backup import Backup
+from .exchange import Store, new_run
+from .extract import project_dir, projects_home
+from .fsutil import atomic_write
+
+LANG = {"ja": "日文", "mixed": "混合", "zh-Hans": "簡中", "zh-Hant": "繁中", "zh": "中文", "unknown": "未知",
+        "packs": "中文包"}
 
 
 def open_game(path: Path, home: Path | None = None) -> tuple[Path, engines.EnginePlugin, Store]:
@@ -30,12 +39,239 @@ def counts(store: Store) -> dict:
             "skip": by["skip"], "orphan": by["orphan"]}
 
 
-def translate(store: Store, plugin, backend, limit=None, progress=None, stop=None) -> dict:
+def extract(game: Path, plugin, store: Store, force=False) -> dict:
+    """Raises extract.LanguageGateStop when the game is already Chinese; `force` is「仍要翻譯」."""
+    return extraction.extract(game, plugin, store, force=force)
+
+
+def estimate(store: Store, plugin, backend, limit=None, only=None, fresh=False) -> dict:
     if not store.manifest:
         raise ValueError("尚未提取文本，請先執行 extract")
-    pipeline.select(store, limit)
+    return pipeline.estimate(store, plugin.control_codes, backend, limit, only, fresh)
+
+
+def translate(store: Store, plugin, backend, limit=None, progress=None, stop=None, only=None, fresh=False) -> dict:
+    """While running, `store.busy` keeps the glossary read-only (pipeline.update_glossary writes it)."""
+    if not store.manifest:
+        raise ValueError("尚未提取文本，請先執行 extract")
+    pipeline.select(store, limit, only)
     backend.prepare()
-    return pipeline.run(store, plugin.control_codes, backend, limit, progress=progress, stop=stop)
+    store.busy = True
+    try:
+        return pipeline.run(store, plugin.control_codes, backend, limit, progress=progress, stop=stop,
+                            only=only, fresh=fresh)
+    finally:
+        store.busy = False
+
+
+def preview(game: Path, store: Store, plugin) -> writeback.ApplyPlan:
+    return writeback.plan(game, store, plugin)
+
+
+def apply(game: Path, plan: writeback.ApplyPlan) -> None:
+    writeback.commit(game, plan)
+
+
+def restore(game: Path) -> list[tuple[str, str]]:
+    return Backup(game).restore()
+
+
+def undo(store: Store, run: str) -> int:
+    return store.undo(run)
+
+
+def export_batches(store: Store, plugin) -> list[Path]:
+    return exchange.export_batches(store, plugin.control_codes)
+
+
+def import_batches(store: Store, plugin, files: list[Path]) -> tuple[str, int, dict]:
+    run = new_run()
+    ok, bad = exchange.import_batches(store, plugin.control_codes, files, run)
+    return run, ok, bad
+
+
+def masked(rec: dict, plugin) -> tuple[str, str, dict]:
+    """(source, translation, masks) with control codes as placeholders, for the editor's tags."""
+    core, _ = text.normalize(rec["src"])
+    src, masks = text.mask(core, plugin.control_codes)
+    dst = text.normalize(rec.get("dst") or "")[0]
+    for key, code in sorted(masks.items(), key=lambda kv: -len(kv[1])):
+        dst = dst.replace(code, key)
+    return src, dst, masks
+
+
+def edit(store: Store, plugin, rid: str, dst: str) -> list[str]:
+    """Manual edit (masked text). Same T11 checks as the translator; on success the row becomes reviewed."""
+    rec = store.records[rid]
+    src, _, masks = masked(rec, plugin)
+    errors = text.validate(src, dst, masks)
+    if not errors:
+        pad = text.normalize(rec["src"])[1]
+        store.update_many(new_run(), [(rid, _reviewed(rec, text.postprocess(dst, masks, pad)))])
+    return errors
+
+
+def mark_reviewed(store: Store, ids) -> int:
+    items = [(i, _reviewed(store.records[i], store.records[i]["dst"])) for i in ids
+             if store.records[i].get("dst") and store.records[i]["status"] != "reviewed"]
+    store.update_many(new_run(), items)
+    return len(items)
+
+
+def apply_same(store: Store, rid: str) -> int:
+    """Copy one translation to the other rows with the same source text (rows differ only by kind)."""
+    rec = store.records[rid]
+    if not rec.get("dst"):
+        return 0
+    items = [(r["id"], _reviewed(r, rec["dst"])) for r in store.records.values()
+             if r["id"] != rid and r["src"] == rec["src"] and r["status"] not in ("skip", "orphan")]
+    store.update_many(new_run(), items)
+    return len(items)
+
+
+def _reviewed(rec: dict, dst: str) -> dict:
+    return {"dst": dst, "status": "reviewed", "by": "manual", "errors": [],
+            "flags": [f for f in rec.get("flags", []) if f != "failed"]}
+
+
+GLOSSARY_HEAD = ["src", "dst", "note", "source"]
+
+
+def glossary(store: Store) -> list[list[str]]:
+    path = store.dir / "glossary.tsv"
+    lines = path.read_text("utf-8").splitlines()[1:] if path.exists() else []
+    return [(line.split("\t") + ["", "", ""])[:4] for line in lines if line]
+
+
+def save_glossary(store: Store, rows: list[list[str]]) -> None:
+    if getattr(store, "busy", False):
+        raise ValueError("翻譯進行中，術語表暫時唯讀")
+    seen = set()
+    for row in rows:
+        if not row[0] or row[0] in seen or any(c in cell for cell in row for c in "\t\r\n"):
+            raise ValueError(f"術語原文不可空白、重複，欄位不可含 Tab 或換行：{row[0]!r}")
+        seen.add(row[0])
+    body = "\t".join(GLOSSARY_HEAD) + "\n" + "".join("\t".join(r) + "\n" for r in rows)
+    atomic_write(store.dir / "glossary.tsv", body.encode("utf-8"))
+
+
+def launch(game: Path) -> None:
+    """MV keeps Game.exe next to www/, MZ inside the game folder."""
+    exe = next((d / "Game.exe" for d in (game, game.parent) if (d / "Game.exe").is_file()), None)
+    if exe is None:
+        raise ValueError("找不到 Game.exe，請手動啟動遊戲")
+    subprocess.Popen([str(exe)], cwd=exe.parent)
+
+
+def open_folder(path: Path) -> None:
+    os.startfile(path)  # shortcut: Windows only (the target platform); add xdg-open/open when other OSes are supported.
+
+
+def config_path() -> Path:
+    return projects_home().parent / "config.json"
+
+
+CONFIG_KEYS = {"sakura": set(SakuraConfig.__dataclass_fields__),
+               "codex": set(CodexConfig.__dataclass_fields__) | {"privacy_ack"}}
+
+
+def load_config() -> dict:
+    path = config_path()
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text("utf-8"))
+    except (ValueError, OSError) as ex:
+        raise ValueError(f"無法讀取設定檔 {path}：{ex}") from ex
+    if not isinstance(data, dict):
+        raise ValueError(f"設定檔 {path} 格式錯誤")
+    return data
+
+
+def save_config(section: str, values: dict) -> None:
+    """Validated by the backend's own config class; other keys in config.json are kept."""
+    unknown = set(values) - CONFIG_KEYS[section]
+    if unknown:
+        raise ValueError(f"未知的 {section} 設定：{', '.join(sorted(unknown))}")
+    (SakuraConfig if section == "sakura" else CodexConfig)(**{k: v for k, v in values.items() if k != "privacy_ack"})
+    data = load_config()
+    data[section] = values
+    atomic_write(config_path(), json.dumps(data, ensure_ascii=False, indent=1).encode("utf-8"))
+
+
+def sakura_config() -> SakuraConfig:
+    return SakuraConfig(**load_config().get("sakura", {}))
+
+
+def codex_config() -> CodexConfig:
+    return CodexConfig(**{k: v for k, v in load_config().get("codex", {}).items() if k != "privacy_ack"})
+
+
+class Library:
+    """Games the GUI knows about (library.json). Removing one forgets it; game files and project data stay."""
+
+    def __init__(self, path: Path | None = None):
+        self.path = path or projects_home().parent / "library.json"
+        self.games: dict[str, dict] = json.loads(self.path.read_text("utf-8"))["games"] if self.path.exists() else {}
+
+    def _save(self) -> None:
+        atomic_write(self.path, json.dumps({"games": self.games}, ensure_ascii=False, indent=1).encode("utf-8"))
+
+    def add(self, path: Path) -> list[str]:
+        game, plugin, _ = open_game(path)
+        return self._add([(game, plugin)])
+
+    def scan(self, parent: Path, depth: int = 5) -> list[str]:
+        return self._add(engines.find_game_roots(Path(parent).resolve(), depth))
+
+    def _add(self, roots) -> list[str]:
+        for game, plugin in roots:
+            self.games.setdefault(str(game), {"engine": plugin.name}).update(_detect(game, plugin))
+        self._save()
+        return [str(game) for game, _ in roots]
+
+    def redetect(self, key: str) -> None:
+        game, plugin, _ = open_game(Path(key))
+        self.games[key] = {"engine": plugin.name, **_detect(game, plugin)}
+        self._save()
+
+    def remove(self, key: str) -> None:
+        self.games.pop(key, None)
+        self._save()
+
+    def row(self, key: str, home: Path | None = None) -> dict:
+        """Name, engine, language label, status and progress of one library row (§11.3)."""
+        e, game = self.games[key], Path(key)
+        row = {"key": key, "name": game.parent.name if game.name.lower() == "www" else game.name,
+               "engine": e["engine"], "lang": LANG.get(e.get("lang"), e.get("lang", "")), "progress": 0,
+               "no_need": False, "reason": e.get("unsupported", "")}
+        if row["reason"]:
+            return {**row, "status": "不支援"}
+        if e.get("lang") == "packs" or e.get("lang", "").startswith("zh"):
+            row.update(no_need=True, reason=_probe_text(e.get("probe", {})))
+        plugin = next(p for p in engines.PLUGINS if p.name == e["engine"])
+        project = project_dir(game, plugin, home)
+        if (project / "manifest.json").exists():
+            c = counts(Store(project))
+            done = c["translated"] + c["reviewed"]
+            todo = done + c["pending"] + c["failed"]
+            row["progress"] = round(100 * done / todo) if todo else 100
+        row["status"] = ("已寫回" if Backup(game).files else "已提取" if (project / "manifest.json").exists()
+                         else "不需翻譯" if row["no_need"] else "未處理")
+        return row
+
+
+def _detect(game: Path, plugin) -> dict:
+    try:
+        lang, packs = extraction.probe(game, plugin)
+    except (ValueError, OSError) as ex:
+        return {"lang": "", "probe": {}, "unsupported": str(ex)}
+    return {"lang": "packs" if packs else lang["primary"], "probe": lang, "unsupported": ""}
+
+
+def _probe_text(p: dict) -> str:
+    return (f"假名比例 {p.get('kana_ratio', 0):.0%}、簡體專有字 {p.get('simp_only', 0)}、"
+            f"繁體專有字 {p.get('trad_only', 0)}、內建語言包 {len(p.get('packs', []))} 個")
 
 
 def history(store: Store) -> list[dict]:

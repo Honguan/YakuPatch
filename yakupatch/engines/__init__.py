@@ -22,6 +22,10 @@ def find_game_roots(path: Path, depth: int = 3) -> list[tuple[Path, EnginePlugin
     if depth == 0:
         return []
     found = []
-    for child in sorted(p for p in path.iterdir() if p.is_dir() and not p.name.startswith("_yakupatch")):
+    try:
+        children = sorted(p for p in path.iterdir() if p.is_dir() and not p.name.startswith("_yakupatch"))
+    except OSError:          # unreadable folders (permissions, offline drives) are skipped while scanning a library
+        return found
+    for child in children:
         found += find_game_roots(child, depth - 1)
     return found

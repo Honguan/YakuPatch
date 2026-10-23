@@ -86,7 +86,74 @@ Ran 46 tests ... OK
 
 ### 未完成
 
-- 階段 B GUI：尚未開始。
+- 階段 B GUI：見下節。
+
+### Commit
+
+見本報告所在 commit（`git log -1 -- docs/I2_REPORT.md`）。
+
+## 階段 B：GUI
+
+分支：`i2-gui`（從已合併階段 A 的 `main` 1bf6d2e 開）。日期：2026-10-23。
+
+### 修改檔案
+
+| 檔案 | 內容 |
+|---|---|
+| `yakupatch/core.py` | B0：提取、預估、寫回預覽／寫回、還原、撤銷、匯出入；手改（T11 驗證後標 `reviewed`）、標為已審閱、套用到相同原文；術語讀寫；`config.json` 讀寫（`sakura`、`codex` 段）；`Library`（遊戲庫、`library.json`）；啟動遊戲、開啟資料夾 |
+| `yakupatch/pipeline.py` | `select`／`estimate`／`run` 加 `only`（指定句子，可含已翻譯，不含已審閱）與 `fresh`（略過快取，重翻用）；統計加 `total` |
+| `yakupatch/extract.py` | 把讀檔解析拆成 `read_game`、語言預檢拆成 `probe`，遊戲庫不寫檔即可判定語言；`extract` 行為不變 |
+| `yakupatch/exchange.py` | `Store.busy`：翻譯進行中時術語表唯讀 |
+| `yakupatch/engines/__init__.py` | 掃描遇到無法讀取的資料夾時略過，不中斷 |
+| `yakupatch/cli.py` | `translate --backend codex` 讀 `config.json` 的 `codex` 段（命令列優先）；其他輸出不變 |
+| `yakupatch/gui/` | `window.py` 主視窗與五個分頁、`settings.py` 設定、`models.py` 表格 model、篩選、佔位符標籤編輯器 |
+| `tests/test_core.py`、`tests/test_gui.py` | B0 的 7 個測試；GUI offscreen 的 5 個測試 |
+| `pyproject.toml`、`README.md`、`PROJECT_PLAN.md` | 加 `PySide6` 依賴與 `yakupatch-gui`；使用說明；§15 狀態 |
+
+### 邏輯摘要
+
+- **單一寫入者**：GUI 每款遊戲只開一個 `Store`，所有寫入經 Core API。Store 與工作的回呼在背景執行緒觸發，透過 Qt signal 轉回主執行緒。
+- **背景工作**：提取、預估、寫回、還原、登入、測試連線都送進 `JobQueue`（key=None，不排隊）；翻譯以後端名稱為 key，同一後端一次一個，其他的排隊。
+- **暫停與錯誤**：暫停＝在波次之間停止；繼續＝`JobQueue.resume`，靠 pending 接續。`AuthRequired`／`UsageLimit`／`ConfigError` 讓工作停下，翻譯分頁顯示說明與處理按鈕（重新登入、稍後繼續、開啟設定）。
+- **手改**：編輯器顯示遮罩後的譯文，`<0>` 這類佔位符以標籤樣式呈現；游標不會停在標籤中間，Backspace／Delete 一次刪整個標籤。儲存時用與翻譯相同的 T11 檢查，未通過不寫入並顯示原因；通過後還原控制碼與前後空白，標為 `reviewed`、`by=manual`，產生可撤銷的 run。
+- **重翻**：指定句子並略過快取，否則相同上下文會直接拿到快取的舊譯文。
+- **術語**：選擇「翻譯中唯讀」而非合併：`core.translate` 期間 `Store.busy` 為真，`save_glossary` 會拒絕；另檢查原文不可空白、重複，欄位不可含 Tab 或換行。
+- **設定**：Sakura、Codex 各用自己的 config class 驗證後才寫入，只換掉自己的段落；失敗時檔案不變。Codex 首次翻譯前詢問隱私並記錄 `privacy_ack`。
+- **在地化**：介面字串經 `QCoreApplication.translate`。原文就是繁體中文，所以沒有另外產生語言檔。高 DPI 用 Qt 6 預設行為。
+
+### 測試結果
+
+- `python -X utf8 -m unittest discover -s tests -t tests`：58 個測試，全數通過（3.0 秒）。另以 `-W error::DeprecationWarning` 跑一次，同樣通過。
+- 新增：手改未通過 T11 被拒、手改可撤銷、標為已審閱與套用到相同原文、指定句子重翻略過快取且不碰已審閱、術語在翻譯中唯讀、`config.json` 保留其他鍵且驗證失敗不寫入、遊戲庫掃描與持久化、移除不動遊戲檔、語言預檢「仍要翻譯」；GUI：標籤切分與整塊刪除、表格 model 與篩選、Store 事件更新表格、GUI 走完提取 → 翻譯（第二個同後端工作排隊）→ 手改 → 寫回 → 撤銷 → 還原、`UsageLimit` 暫停後顯示處理按鈕並可繼續。
+
+### 真實測試
+
+從階段 A 盤點中「日文、無錯誤、片段數少於 3000」的 6 款，用 seed 20261024 隨機抽 3 款。來源唯讀，前兩款只複製 `data`、`js`、`index.html`、`package.json`，第三款複製整個遊戲（含 `Game.exe`）以測試啟動。以 Python 驅動 `MainWindow`（真實 Qt 平台，確認對話框以 mock 回答「是」），`YAKUPATCH_HOME` 指向暫存目錄，不動使用者的設定與遊戲庫。每款依序：加入遊戲庫 → 提取 → 試譯前 20 句 → 翻譯其餘 → 文本分頁手改 1 句 → 預覽 → 寫回 → 再預覽（應無變更）→（第三款）啟動遊戲 → 撤銷試譯 → 還原 → 比對雜湊。
+
+| 引擎 | 遊戲 | 後端 | 記錄 | 待翻 | 試譯 | 全部翻譯（成功／失敗） | 翻譯秒數 | 寫回檔／處 | 再寫回 | 啟動 | 還原雜湊／來源雜湊 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| MZ | `D:\Games\TEMP\2025-12-12\01511868\01511868\Game` | Codex | 759 | 742 | 20／0 | 722／0 | 173.7 | 10／928 | 0 檔 | — | 一致／一致 |
+| MV | `D:\Games\TEMP\2025-06-05\しすたーず!-義姉妹との性活-\しすたーず!-義姉妹との性活-\www` | Codex | 553 | 538 | 20／0 | 518／0 | 328.0 | 12／1853 | 0 檔 | — | 一致／一致 |
+| MV | `D:\Games\TEMP\2025-06-05\01348401\www` | Sakura | 493 | 479 | 20／0 | 417／42 | 725.9 | 14／1541 | 0 檔 | 15 秒後仍在執行 | 一致／一致 |
+
+- 3 款手改的句子都變成 `reviewed`；撤銷試譯的紀錄都標為已撤銷；過程中沒有出現錯誤對話框。
+- Sakura 的 42 句失敗：殘留日文 41、超出長度 1，都被 T11 攔下並保留原文，和 I1 的 Sakura 品質一致。
+- 第 2 款與階段 A 抽到的遊戲相同（隨機結果）。
+- 機器報告在 session scratchpad 的 `real_gui.json`（未提交）。
+
+### 新增 shortcut 與已知限制
+
+- `core.open_folder`：只支援 Windows（`os.startfile`）。
+- `MainWindow.refresh_library`：每次重新整理都從磁碟讀各專案來算進度；遊戲庫很大時可能變慢，屆時把統計快取進 `library.json`。
+- 啟動遊戲只找 `Game.exe`（遊戲資料夾或上一層），找不到就提示手動啟動。
+- 移除遊戲只從遊戲庫拿掉，專案資料保留，重新加入即可接續。
+- 真實測試只確認遊戲程序能啟動，**沒有人工確認畫面上的譯文**。§15 要求「一般使用者不碰命令列」：由於對話框以程式回答，仍需要使用者親手操作一次 GUI 驗收。
+
+### 未完成
+
+- 使用者親自操作的 GUI 手動驗收（含啟動遊戲後目視確認譯文、翻譯中切換遊戲瀏覽）。下列項目尚未做手動驗收清單：開啟 GUI → 加入／掃描 → 總覽預檢 → 提取 → 試譯 → 翻譯 → 文本手改 → 寫回 → 啟動遊戲 → 撤銷 → 還原。
+- 依提示詞不做：首次啟動精靈、OneClickLLAMA 代為啟動、其他 OpenAI 相容後端、外部字典查詢、深色主題、多語系語言檔、PyInstaller 打包。
+- 文本分頁的「無法編碼」「不一致」篩選、術語「全部確認」需再按一次確認、字典查詢面板：未做（字典為 I3）。
 
 ### Commit
 

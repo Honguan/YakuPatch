@@ -31,10 +31,15 @@ class Work:
     attempts: int = 0
 
 
-def select(store: Store, limit: int | None = None) -> list[dict]:
+def select(store: Store, limit: int | None = None, only=None) -> list[dict]:
+    """`only` (ids) is an explicit user choice: it may include translated or uncertain rows, never reviewed ones."""
     if limit is not None and limit < 0:
         raise ValueError("--limit 不可小於零")
-    rows = [r for r in store.records.values() if selectable(r) and "refused" not in r.get("errors", [])]
+    if only is not None:
+        rows = [store.records[i] for i in only if i in store.records and
+                store.records[i]["status"] in ("pending", "failed", "translated")]
+    else:
+        rows = [r for r in store.records.values() if selectable(r) and "refused" not in r.get("errors", [])]
     rows.sort(key=lambda r: r["kind"] not in ("name", "system"))
     return rows if limit is None else rows[:limit]
 
@@ -116,12 +121,12 @@ def cache_get(store: Store, key: str) -> str | None:
     return row[0] if row else None
 
 
-def estimate(store: Store, codes: list[str], backend, limit=None) -> dict:
-    rows = select(store, limit)
+def estimate(store: Store, codes: list[str], backend, limit=None, only=None, fresh=False) -> dict:
+    rows = select(store, limit, only)
     terms = glossary(store)
     works = work_list(store, rows, codes, terms)
-    hits = sum(cache_get(store, cache_key(w, backend, terms)) is not None for w in works)
-    pending = [w for w in works if cache_get(store, cache_key(w, backend, terms)) is None]
+    hits = 0 if fresh else sum(cache_get(store, cache_key(w, backend, terms)) is not None for w in works)
+    pending = works if fresh else [w for w in works if cache_get(store, cache_key(w, backend, terms)) is None]
     groups = batches(pending, backend, terms, store)
     return {"items": len(rows), "characters": sum(len(r["src"]) for r in rows), "cached": hits,
             "batches": len(groups), "input_tokens": sum(tokens(backend.messages(g, terms)) for g in groups),
@@ -213,15 +218,18 @@ def dispatch(works: list[Work], backend, terms: dict, sleep=time.sleep, cancelle
     return solve(works)
 
 
-def run(store: Store, codes: list[str], backend, limit=None, progress=None, sleep=time.sleep, stop=None) -> dict:
-    """`stop` (threading.Event) ends the job between waves; finished batches stay saved, the rest stay pending."""
+def run(store: Store, codes: list[str], backend, limit=None, progress=None, sleep=time.sleep, stop=None,
+        only=None, fresh=False) -> dict:
+    """`stop` (threading.Event) ends the job between waves; finished batches stay saved, the rest stay pending.
+    `fresh` skips the cache (re-translate this sentence)."""
     if not store.manifest:
         raise ValueError("尚未提取文本，請先執行 extract")
     if backend.caps.io_format not in ("lines", "json_ids"):
         raise ConfigError(f"不支援的後端輸出格式：{backend.caps.io_format}")
-    rows = select(store, limit)
+    rows = select(store, limit, only)
     run_id = new_run()
-    stats = {"run": run_id, "translated": 0, "failed": 0, "cached": 0, "errors": Counter(), "stopped": False}
+    stats = {"run": run_id, "total": len(rows), "translated": 0, "failed": 0, "cached": 0, "errors": Counter(),
+             "stopped": False}
     started = time.monotonic()
 
     def save(results, keys, cached=False):
@@ -267,7 +275,7 @@ def run(store: Store, codes: list[str], backend, limit=None, progress=None, slee
                     pending = []
                     for w in refreshed:
                         keys[w.id] = cache_key(w, backend, terms)
-                        cached = cache_get(store, keys[w.id])
+                        cached = None if fresh else cache_get(store, keys[w.id])
                         if cached is not None and not translate.validate(w.text, cached, w.masks,
                                                                          getattr(backend.config, "repeat_threshold", 4)):
                             w.result = cached
