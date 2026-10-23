@@ -6,9 +6,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import engines, langdetect
+from . import dicts, engines, langdetect, vfs
 from .backup import Backup
-from .encoding import decode
 from .engines import EnginePlugin, Segment
 from .exchange import Store
 from .fsutil import atomic_write, sha256
@@ -44,7 +43,8 @@ def projects_home() -> Path:
 
 def project_dir(game_dir: Path, plugin: EnginePlugin, home: Path | None = None) -> Path:
     """G1: name + fingerprint of engine and original title, so moving the folder keeps the project."""
-    title = plugin.title(game_dir, Backup(game_dir).original_bytes)
+    backup = Backup(game_dir)
+    title = plugin.title(game_dir, lambda rel: vfs.read_original(game_dir, rel, backup))
     fp = hashlib.sha256(f"{plugin.name}\0{title}".encode("utf-8")).hexdigest()[:8]
     return (home or projects_home()) / f"{game_dir.name}-{fp}"
 
@@ -54,8 +54,8 @@ def read_game(game_dir: Path, plugin: EnginePlugin) -> tuple[dict, list[tuple[st
     backup = Backup(game_dir)
     files, segments = {}, []
     for rel in plugin.locate(game_dir):                                   # E3
-        raw = backup.original_bytes(rel)                                  # E2 (loose files)
-        text, info = decode(raw, plugin.default_encoding)                 # E4
+        raw = vfs.read_original(game_dir, rel, backup)                    # E2
+        text, info = plugin.decode(rel, raw)                              # E4
         files[rel] = {"sha256": sha256(raw), **info}
         try:
             segments += [(rel, s) for s in plugin.parse(rel, text)]      # E5
@@ -152,7 +152,8 @@ def _id(records: dict, kind: str, text: str) -> str:
 
 
 def seed_glossary(project: Path, records: dict[str, dict]) -> None:
-    """E10: names and speakers become glossary candidates; existing rows are never overwritten."""
+    """E10: names and speakers become glossary candidates; existing rows are never overwritten.
+    Local dictionaries (§6.10) add readings and existing Chinese names as unconfirmed `dict:` suggestions."""
     path = project / "glossary.tsv"
     rows = {}
     if path.exists():
@@ -162,7 +163,7 @@ def seed_glossary(project: Path, records: dict[str, dict]) -> None:
     for rec in records.values():
         for term in (rec["src"] if rec["kind"] == "name" and rec["status"] == "pending" else None, rec["speaker"]):
             if term and "\t" not in term and "\n" not in term and term not in rows:
-                rows[term] = f"{term}\t\t\tseed"
+                rows[term] = "\t".join((term, *(dicts.suggest(term) or ("", "", "seed"))))
     body = "src\tdst\tnote\tsource\n" + "".join(r + "\n" for r in rows.values())
     atomic_write(path, body.encode("utf-8"))
 

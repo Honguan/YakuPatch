@@ -160,6 +160,33 @@ class Gui(unittest.TestCase):
         self.idle()
         self.assertEqual(snapshot(self.game), self.original)
 
+    def test_qa_button_filters_inconsistent_and_style_saves(self):
+        win = self.win
+        win.extract()
+        self.idle()
+        store = win.current[2]
+        a, b = [r for r in store.records.values() if r["status"] == "pending"][:2]
+        store.update_many("t", [(a["id"], {"dst": "甲", "status": "translated"}),
+                                (b["id"], {"dst": "乙", "status": "failed"})])
+        store.update_many("t", [(b["id"], {"src": a["src"], "status": "translated", "dst": "完全不同的譯文"})])
+        win.run_qa()
+        self.assertEqual(win.f_flag.currentData(), "inconsistent")
+        self.assertEqual(win.proxy.rowCount(), 2)
+        win.table.selectRow(0)
+        self.assertIn("不一致", win.edit_error.text())
+        win.load_glossary()
+        win.style_edit.setPlainText("語氣輕鬆")
+        win.save_style()
+        self.assertEqual(core.style(store), "語氣輕鬆")
+
+    def test_settings_dictionary_tab_lists_sources(self):
+        from yakupatch import dicts
+        from yakupatch.gui.settings import SettingsDialog
+        with patch.object(SettingsDialog, "_account", return_value=""):
+            dlg = SettingsDialog(self.win, 3)
+        self.assertEqual(dlg.dict_table.rowCount(), len(dicts.SOURCES))
+        self.assertEqual(dlg.dict_table.item(0, 2).text(), "查詢後建立")
+
     def test_usage_limit_pauses_with_action_and_resumes(self):
         win = self.win
         win.extract()

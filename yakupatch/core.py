@@ -9,7 +9,8 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-from . import __version__, engines, exchange, extract as extraction, pipeline, translate as text, writeback
+from . import (__version__, dicts, engines, exchange, extract as extraction, pipeline, translate as text, vfs,
+               writeback)
 from .backends.codex import CodexConfig
 from .backends.sakura import SakuraConfig
 from .backup import Backup
@@ -155,6 +156,55 @@ def save_glossary(store: Store, rows: list[list[str]]) -> None:
     atomic_write(store.dir / "glossary.tsv", body.encode("utf-8"))
 
 
+def dict_fill(store: Store) -> int:
+    """Re-run dictionary suggestions (§6.10) for glossary candidates that still have no translation."""
+    rows, n = glossary(store), 0
+    for r in rows:
+        if r[3] == "seed" and not r[1]:
+            hit = dicts.suggest(r[0])
+            if hit and (hit[0] or hit[1] and not r[2]):
+                r[1], r[2], r[3] = hit[0], r[2] or hit[1], hit[2]
+                n += 1
+    if n:
+        save_glossary(store, rows)
+    return n
+
+
+def dict_vndb(game: Path, plugin, store: Store) -> int:
+    """VNDB character names for this game (sends only the title); new names become glossary candidates."""
+    title = plugin.title(game, lambda rel: vfs.read_original(game, rel)) or game.name
+    rows = glossary(store)
+    known = {r[0] for r in rows}
+    added = [[src, "", "", "seed"] for src in dict.fromkeys(r[0] for r in dicts.fetch_vndb(title)) if src not in known
+             and not any(c in src for c in "\t\r\n")]
+    if added:
+        save_glossary(store, rows + added)
+    dict_fill(store)
+    return len(added)
+
+
+def dict_wikidata(store: Store) -> int:
+    """Ask Wikidata about candidates without a translation (sends only those terms)."""
+    terms = [r[0] for r in glossary(store) if r[3] == "seed" and not r[1]]
+    if terms:
+        dicts.fetch_wikidata(terms)
+    return dict_fill(store)
+
+
+def qa(store: Store) -> int:
+    """T13 on demand (after manual edits or imports); returns the number of flagged sentences."""
+    return pipeline.qa.check(store, {s: d for s, (d, _) in pipeline.glossary(store).items()})
+
+
+def style(store: Store) -> str:
+    return pipeline.style(store)
+
+
+def save_style(store: Store, text: str) -> None:
+    """F18 style.md: free-form rules sent to backends that follow them (Codex)."""
+    atomic_write(store.dir / "style.md", (text.strip() + "\n" if text.strip() else "").encode("utf-8"))
+
+
 def launch(game: Path) -> None:
     """MV keeps Game.exe next to www/, MZ inside the game folder."""
     exe = next((d / "Game.exe" for d in (game, game.parent) if (d / "Game.exe").is_file()), None)
@@ -278,6 +328,8 @@ def history(store: Store) -> list[dict]:
     """One row per translation/import run (F21), oldest first. Undo runs are listed as `undo-<run>`."""
     rows: dict[str, dict] = {}
     for e in store._all_entries():
+        if e["run"].startswith(("qa-", "undo-qa-")):     # QA flag passes are not translation runs
+            continue
         row = rows.setdefault(e["run"], {"run": e["run"], "time": e.get("ts", 0), "by": "", "items": 0,
                                          "translated": 0, "failed": 0})
         row["items"] += 1
