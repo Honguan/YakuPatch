@@ -5,7 +5,7 @@ YakuPatch 把日文遊戲翻譯成中文。它直接修改遊戲的文字檔，�
 目前支援 RPG Maker MV／MZ、TyranoScript（含 `app.asar`）與 Ren'Py（含 `.rpa`），翻譯後端有 Sakura（本地模型）與 Codex（實驗性）。
 
 > [!NOTE]
-> 專案仍在開發中。I1（MV/MZ、Sakura、命令列）與 I2（圖形介面、Codex）已完成；I3（全文 QA、外部字典、自動換行、Tyrano、Ren'Py）已實作，遊戲畫面尚待人工檢查。設計見 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
+> 專案仍在開發中。I1（MV/MZ、Sakura、命令列）與 I2（圖形介面、Codex）已完成；I3（全文 QA、外部字典、自動換行、Tyrano、Ren'Py）已完成。設計見 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
 
 ## 功能
 
