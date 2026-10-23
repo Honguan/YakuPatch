@@ -67,7 +67,7 @@ def plan(game_dir: Path, store: Store, plugin: EnginePlugin) -> ApplyPlan:
             parts = [plugin.fit(rec["kind"], p) for p in parts]
             repl[ref["file"]].update(zip(ref["locs"], parts))
     texts = {rel: plugin.decode(rel, originals[rel])[0] for rel in infos}
-    outputs = plugin.outputs(texts, {rel: r for rel, r in repl.items() if r})
+    outputs = plugin.outputs(texts, {rel: r for rel, r in repl.items() if r}, game_dir)
     if outputs is not None:                       # new files beside the game; the originals stay untouched
         for rel in sorted(set(outputs) | {r for r in backup.files if backup.is_created(r)}):
             data, n = outputs.get(rel, (None, 0))

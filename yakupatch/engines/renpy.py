@@ -284,7 +284,8 @@ class RenPy(EnginePlugin):
     def parse(self, rel: str, text: str) -> list[Segment]:
         return [Segment(e["loc"], e["kind"], e["text"], e.get("speaker")) for e in json.loads(text)]
 
-    def outputs(self, texts: dict[str, str], repl: dict[str, dict[str, str]]) -> dict[str, tuple[bytes, int]]:
+    def outputs(self, texts: dict[str, str], repl: dict[str, dict[str, str]],
+                game_dir: Path | None = None) -> dict[str, tuple[bytes, int]]:
         files, strings = {}, {}
         for rel, r in repl.items():
             blocks = []
