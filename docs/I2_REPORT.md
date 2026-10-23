@@ -20,7 +20,7 @@
 ### 邏輯摘要
 
 - **A1 json_ids**：id 為批次內位置字串。重複 id、未知 id、非 JSON → 整批 `bad_json`，走既有拆批重送；缺漏的 id → 該句 `missing_id`，其他句照常保存。
-- **A2 Codex**：瀏覽器登入（PKCE，回呼 `localhost:1455`，失敗時改 1457；用 `hmac.compare_digest` 檢查 state）。憑證只存 keyring，每 1000 字元一段；先寫完新的一組，再切換指標 `current`，寫一半當機時舊憑證仍可用。剩不到 60 秒過期或收到 401 就更新 token，更新後先存再用（refresh token 會輪替）。`store: false`、JSON schema 輸出、`prompt_cache_key` 固定為後端識別。錯誤分類：`usage_limit_reached` → UsageLimit；401 → AuthRequired；model_not_found／403 → ConfigError；context_length → TooLong；429 與 5xx → Transient；refusal → Refused。
+- **A2 Codex**：瀏覽器登入（PKCE，回呼 `localhost:1455`，失敗時改 1457；用 `hmac.compare_digest` 檢查 state）。憑證只存 keyring，每 1000 字元一段；先寫完新的一組，再切換指標 `current`，寫一半當機時舊憑證仍可用。剩不到 60 秒過期或收到 401 就更新 token，更新後先存再用（refresh token 會輪替）。`store: false`、JSON schema 輸出、每個翻譯工作（Codex 物件）用一把隨機的 `prompt_cache_key`。錯誤分類：`usage_limit_reached` → UsageLimit；401 → AuthRequired；model_not_found／403 → ConfigError；context_length → TooLong；429 與 5xx → Transient；refusal → Refused。
 - **A3 預估與暫停**：metered 後端翻譯前顯示預估輸入／輸出 token 並詢問（`--yes` 略過）。UsageLimit、AuthRequired、ConfigError 會中止工作，已完成的批次已保存，其餘維持 pending，重跑即續翻。
 - **A4 佇列**：同一個後端 key 同時只跑一個工作，其餘排隊；key=None（提取、寫回）立即執行。暫停＝在波次之間停止；繼續＝`resume` 重新送出，靠 pending 狀態接續。
 - **A5 歷史**：`core.history` 按 run 彙總日誌（含已封存的 `history/`），列出時間、後端、筆數、成功／失敗、是否已撤銷；撤銷沿用 `Store.undo`。
