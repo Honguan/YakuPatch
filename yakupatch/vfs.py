@@ -1,9 +1,13 @@
 """E2 Unpacker / W7 for packed engines (PROJECT_PLAN §3.5, §3.6). A member path is "<container>!<inner>",
 e.g. "resources/app.asar!data/scenario/first.ks". Containers are read-only except Asar.patch, which never moves
 data: changed members become `unpacked` entries in a same-length header, their bytes go to <name>.unpacked/."""
+import codecs
 import hashlib
+import io
 import json
+import pickle
 import struct
+import zlib
 from pathlib import Path
 
 from .backup import Backup
@@ -98,6 +102,55 @@ class Asar:
         return head, out
 
 
+class _SafeUnpickler(pickle.Unpickler):
+    """Plain data only: an RPA index is a dict of lists of tuples; bytes may come as _codecs.encode / bytes()."""
+
+    def find_class(self, module, name):
+        if (module, name) == ("_codecs", "encode"):
+            return codecs.encode
+        if module in ("builtins", "__builtin__") and name == "bytes":     # protocol 2 writes b"" as bytes()
+            return bytes
+        raise pickle.UnpicklingError(f"封包索引含不允許的物件：{module}.{name}")
+
+
+class Rpa:
+    """Ren'Py archive (read-only): "RPA-3.0 <offset hex> <key hex>\\n" or "RPA-2.0 <offset hex>\\n", then a
+    zlib pickle index {name: [(offset, length, prefix)]}; RPA-3.0 XORs offset and length with the key."""
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        with open(self.path, "rb") as f:
+            line = f.readline(200).split()
+            if not line or line[0] not in (b"RPA-3.0", b"RPA-2.0"):
+                raise ValueError("不支援的 RPA 封包版本")
+            offset = int(line[1], 16)
+            key = 0
+            if line[0] == b"RPA-3.0":
+                for part in line[2:]:
+                    key ^= int(part, 16)
+            f.seek(offset)
+            raw = zlib.decompressobj().decompress(f.read(), MAX_FILE_BYTES)
+        index = _SafeUnpickler(io.BytesIO(raw), encoding="bytes").load()
+        self.files: dict[str, tuple[int, int, bytes]] = {}
+        for name, parts in index.items():
+            name = name.decode("utf-8") if isinstance(name, bytes) else name
+            start, length, *prefix = parts[0]
+            prefix = prefix[0] if prefix else b""
+            prefix = prefix.encode("latin-1") if isinstance(prefix, str) else prefix
+            self.files[_inner_ok(name)] = (start ^ key, length ^ key, prefix)
+
+    def read(self, inner: str) -> bytes:
+        start, length, prefix = self.files[inner]
+        if length > MAX_FILE_BYTES:
+            raise UnsafePath(f"檔案超過大小上限：{inner}")
+        with open(self.path, "rb") as f:
+            f.seek(start)
+            data = f.read(length - len(prefix))
+        if len(data) != length - len(prefix):
+            raise ValueError(f"RPA 內容不完整：{inner}")
+        return prefix + data
+
+
 def _integrity(data: bytes) -> dict:
     return {"algorithm": "SHA256", "hash": hashlib.sha256(data).hexdigest(), "blockSize": BLOCK,
             "blocks": [hashlib.sha256(data[i:i + BLOCK]).hexdigest() for i in range(0, max(len(data), 1), BLOCK)]}
@@ -105,6 +158,8 @@ def _integrity(data: bytes) -> dict:
 
 def open_container(game_dir: Path, outer: str, backup: Backup | None = None):
     path = safe_path(game_dir, outer)
+    if outer.lower().endswith(".rpa"):
+        return Rpa(path)
     if not outer.lower().endswith(".asar"):
         raise ValueError(f"不支援的封包格式：{outer}")
     head = (backup or Backup(game_dir)).original_head(outer)
@@ -124,6 +179,8 @@ def read_current(game_dir: Path, rel: str) -> bytes:
     outer, inner = split(rel)
     if inner is None:
         return read_bytes(game_dir, rel)
+    if outer.lower().endswith(".rpa"):
+        return Rpa(safe_path(game_dir, outer)).read(inner)
     return Asar(safe_path(game_dir, outer)).read(inner)
 
 

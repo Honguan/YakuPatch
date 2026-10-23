@@ -8,7 +8,6 @@ from pathlib import Path
 
 from . import dicts, engines, langdetect, vfs
 from .backup import Backup
-from .encoding import decode
 from .engines import EnginePlugin, Segment
 from .exchange import Store
 from .fsutil import atomic_write, sha256
@@ -56,7 +55,7 @@ def read_game(game_dir: Path, plugin: EnginePlugin) -> tuple[dict, list[tuple[st
     files, segments = {}, []
     for rel in plugin.locate(game_dir):                                   # E3
         raw = vfs.read_original(game_dir, rel, backup)                    # E2
-        text, info = decode(raw, plugin.default_encoding)                 # E4
+        text, info = plugin.decode(rel, raw)                              # E4
         files[rel] = {"sha256": sha256(raw), **info}
         try:
             segments += [(rel, s) for s in plugin.parse(rel, text)]      # E5

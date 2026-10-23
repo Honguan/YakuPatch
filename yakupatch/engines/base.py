@@ -2,6 +2,8 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..encoding import decode
+
 
 @dataclass(frozen=True)
 class Segment:
@@ -38,6 +40,16 @@ class EnginePlugin:
     def title(self, game_dir: Path, read) -> str:
         """Original game title, used for the project fingerprint. `read(rel)` returns original bytes."""
         return ""
+
+    def decode(self, rel: str, raw: bytes) -> tuple[str, dict]:
+        """E4: file bytes to the text parse() reads, plus the encoding info W4 checks translations against."""
+        return decode(raw, self.default_encoding)
+
+    def outputs(self, texts: dict[str, str], repl: dict[str, dict[str, str]]) -> dict[str, tuple[bytes, int]] | None:
+        """W5 for engines that add new files instead of editing the originals: {rel: (bytes, translations)} of
+        every file the translation needs (files we created earlier and no longer need are deleted).
+        None: render each file."""
+        return None
 
     def parse(self, rel: str, text: str) -> list[Segment]:
         raise NotImplementedError
