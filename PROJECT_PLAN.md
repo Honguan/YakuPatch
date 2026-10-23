@@ -897,7 +897,7 @@ docs/           使用說明、引擎支援表、遊戲規則檔與交換檔格�
 | **I0 骨架** | RPG Maker MZ 單一引擎走完 A→B→C：提取、交換檔（Store 快照 + 日誌）、匯出／匯入分批檔、寫回、備份還原；安全規則；合規測試套件；CLI | MZ 通過合規測試；手填譯文匯入後遊戲可正常顯示並能還原 |
 | **I1 本地翻譯** | 完成（2026-10-23）：MV/MZ 隨機 10 款翻譯寫回，10 款以 `Game.exe` 實機啟動並顯示譯文（使用者確認）；02_mv、06_mz、10_mz restore 後 data 雜湊與原版一致，再 apply 與原譯版一致。已知問題見 `C:\YakuPatchTest\_quality\REPORT.md` | MV/MZ 隨機 3 款可完整翻譯、啟動、還原 |
 | **I2 介面 + Codex** | 完成（2026-10-23）：階段 A（Core API、工作佇列、Codex 登入與後端、用量預估、撤銷整次翻譯、診斷包、評測集）已實作並通過離線測試；Codex 評測與 3 款 MV/MZ 實機驗收通過；階段 B GUI 已實作，通過離線與 offscreen 測試，並以程式驅動 GUI 完成 3 款 MV/MZ 實機流程（Codex 2、Sakura 1）；使用者親手操作 GUI 驗收通過（2026-10-23，MV 1 款 Sakura 全部翻譯 8,156 句，回報正常）。詳見 `docs/I2_REPORT.md` | 一般使用者不碰命令列即可完成全流程；Codex 額度用完時能暫停並續跑 |
-| **I3 一致性 + 文字腳本引擎** | 已實作（2026-10-23）：術語種子、外部字典（§6.10）、T13 全文 QA、`style.md`、自動換行；Ren'Py、Tyrano。實機驗收：Tyrano 3 款、Ren'Py 1 款（遊戲庫只有 1 款日文且無中文的 Ren'Py）寫回後讀回全為譯文，Ren'Py `compile` 無錯、0 句對話缺譯；QA 在 3 款抓到植入的同名異譯；遊戲畫面待使用者檢查。詳見 `docs/I3_REPORT.md` | 各引擎隨機 3 款實機通過；QA 能抓出刻意植入的同名異譯 |
+| **I3 一致性 + 文字腳本引擎** | 已實作（2026-10-23）：術語種子、外部字典（§6.10）、T13 全文 QA、`style.md`、自動換行；Ren'Py、Tyrano。實機驗收：Tyrano 3 款、Ren'Py 1 款（遊戲庫只有 1 款日文且無中文的 Ren'Py）寫回後讀回全為譯文，Ren'Py `compile` 無錯、0 句對話缺譯；QA 在 3 款抓到植入的同名異譯；4 款以 Codex 真實譯文重跑後，使用者實機檢查通過。詳見 `docs/I3_REPORT.md` | 各引擎隨機 3 款實機通過；QA 能抓出刻意植入的同名異譯 |
 | **I4 封包引擎** | Unity（通用規則 + 3 種框架 + 字型替換）、KiriKiri（patch.xp3） | Unity 隨機 3 款至少 2 款可用且無方塊字；KiriKiri 未加密款可用 |
 | **I5 擴充** | Wolf、Artemis、Godot、CatSystem2、SRPG；CP932 策略 C | 各引擎至少 1 款實機通過 |
 | **I6 發佈** | PyInstaller 打包成 `YakuPatch.exe`（GUI 入口，含程式圖示與版本資訊）、zip 發佈到 GitHub Releases、使用說明、v1.0 | 在未安裝 Python 的乾淨 Windows 電腦上，從 Releases 下載 zip、解壓後雙擊 `YakuPatch.exe` 即可啟動 GUI，並用隨機 1 款遊戲走完提取→翻譯→寫回→啟動→還原 |
