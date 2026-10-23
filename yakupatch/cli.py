@@ -1,14 +1,17 @@
-"""Command line for I0. The GUI (I2) will call the same functions."""
+"""Command line. Shares yakupatch.core with the GUI (I2)."""
 import argparse
 import json
 import sys
+import webbrowser
 from collections import Counter
 from pathlib import Path
 
-from . import engines, exchange, pipeline, writeback
+from . import core, engines, exchange, pipeline, writeback
+from .backends import codex
+from .backends.codex import Codex, CodexConfig
 from .backends.sakura import Sakura, SakuraConfig
 from .backup import Backup
-from .extract import LanguageGateStop, extract, project_dir, projects_home
+from .extract import LanguageGateStop, extract, projects_home
 from .exchange import Store
 
 _LANG = {"ja": "日文", "mixed": "混合（部分已是中文）", "zh-Hans": "簡體中文", "zh-Hant": "繁體中文",
@@ -18,7 +21,7 @@ _REASON = {"placeholders": "佔位符不符", "newlines": "換行數不符", "le
            "empty": "譯文空白", "unknown_id": "找不到 id", "src_changed": "原文已變動",
            "reviewed": "已人工審閱，不覆蓋", "no_dst": "沒有 dst", "bad_json": "JSON 格式錯誤",
            "line_count": "回應行數不符", "too_long": "輸入或輸出超出限制",
-           "transient": "連線重試耗盡", "refused": "模型拒絕翻譯"}
+           "transient": "連線重試耗盡", "refused": "模型拒絕翻譯", "missing_id": "回應缺少此句"}
 
 
 def main(argv=None) -> int:
@@ -29,11 +32,12 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name, help_ in [("detect", "偵測引擎"), ("extract", "提取文本"), ("status", "顯示進度"),
                         ("export", "匯出分批檔"), ("import", "匯入譯文"), ("apply", "寫回遊戲"),
-                        ("restore", "還原遊戲"), ("undo", "撤銷一次匯入"), ("translate", "Sakura 本地翻譯")]:
+                        ("restore", "還原遊戲"), ("undo", "撤銷一次翻譯或匯入"), ("translate", "翻譯（Sakura／Codex）"),
+                        ("diagnose", "匯出診斷包（不含遊戲文本）")]:
         p = sub.add_parser(name, help=help_)
         p.add_argument("game", type=Path)
         if name == "translate":
-            p.add_argument("--backend", choices=["sakura"], default="sakura", help="翻譯後端")
+            p.add_argument("--backend", choices=["sakura", "codex"], default="sakura", help="翻譯後端（Codex 為實驗性）")
             p.add_argument("--limit", type=int, help="只翻前 N 筆（名稱／系統優先）")
             p.add_argument("--dry-run", action="store_true", help="只預估，不連網、不修改專案")
             p.add_argument("--api-base", default="http://127.0.0.1:8080/v1", help="Sakura API 位址")
@@ -49,6 +53,9 @@ def main(argv=None) -> int:
             p.add_argument("--force-glossary", action="store_true", help="每批附上整份術語表")
             p.add_argument("--enlarge-kana", action="store_true", help="放大小假名")
             p.add_argument("--repeat-threshold", type=int, default=20, help="重複退化偵測門檻")
+            p.add_argument("--effort", default="low", help="Codex 推理等級")
+            p.add_argument("--script", choices=["zh-Hant", "zh-Hans"], default="zh-Hant", help="Codex 輸出字體（不做轉換）")
+            p.add_argument("--yes", action="store_true", help="Codex 不詢問用量預估直接開始")
             translate_parser = p
         if name == "extract":
             p.add_argument("--force", action="store_true", help="遊戲已是中文仍要提取")
@@ -58,8 +65,12 @@ def main(argv=None) -> int:
             p.add_argument("--yes", action="store_true", help="確認寫回（不加只顯示預覽）")
         if name == "undo":
             p.add_argument("run", nargs="?", help="不指定時列出可撤銷的紀錄")
+        if name == "diagnose":
+            p.add_argument("--output", type=Path, help="輸出 zip（預設在專案資料夾）")
+    p = sub.add_parser("codex", help="Codex 帳號（實驗性）")
+    p.add_argument("action", choices=["login", "logout", "status", "models"])
     args = ap.parse_args(argv)
-    if args.cmd == "translate":                          # only translate reads config.json, so a bad file never blocks restore
+    if args.cmd == "translate" and args.backend == "sakura":   # only Sakura reads config.json, so a bad file never blocks restore
         try:
             translate_parser.set_defaults(**_sakura_defaults(projects_home().parent / "config.json"))
         except ValueError as ex:
@@ -67,7 +78,7 @@ def main(argv=None) -> int:
             return 1
         args = ap.parse_args(argv)                       # command line still wins over config.json
     try:
-        return _run(args)
+        return _codex(args) if args.cmd == "codex" else _run(args)
     except KeyboardInterrupt:
         print("已中斷；已完成批次已保存，重跑 translate 即可續跑。")
         return 130
@@ -95,12 +106,37 @@ def _sakura_defaults(config: Path) -> dict:
 
 
 def _open(args) -> tuple[Path, engines.EnginePlugin, Store]:
-    roots = engines.find_game_roots(args.game.resolve())
-    if len(roots) != 1:
-        raise ValueError("找不到支援的遊戲" if not roots else
-                         "找到多個遊戲，請指定其中一個：\n" + "\n".join(f"  {r}" for r, _ in roots))
-    game, plugin = roots[0]
-    return game, plugin, Store(project_dir(game, plugin, args.home))
+    return core.open_game(args.game, args.home)
+
+
+def _backend(args):
+    if args.backend == "codex":
+        return Codex(CodexConfig(model=args.model, effort=args.effort, parallel=args.parallel or 4,
+                                 timeout=args.timeout, retries=args.retries, output_script=args.script))
+    return Sakura(SakuraConfig(**{key: getattr(args, key) for key in SakuraConfig.__dataclass_fields__}))
+
+
+def _codex(args) -> int:
+    backend = Codex()
+    if args.action == "login":
+        print("Codex 為實驗性後端（非公開端點）。翻譯時遊戲文本會送到 OpenAI。")
+        print("正在開啟瀏覽器登入 ChatGPT；若沒有自動開啟，請手動開啟下方網址。")
+
+        def show(url):
+            if not webbrowser.open(url):
+                print(url)
+        data = codex.login(backend.credentials, open_url=show)
+        print(f"已登入：{data.get('email') or data['account_id']}")
+    elif args.action == "logout":
+        backend.credentials.clear()
+        print("已登出（只刪除 YakuPatch 自己的憑證，不影響 Codex CLI）。")
+    elif args.action == "status":
+        info = backend.account()
+        print(f"已登入：{info['email'] or info['account_id']}")
+    else:
+        for slug, efforts in backend.list_models().items():
+            print(f"{slug}  推理等級：{', '.join(efforts) or '—'}")
+    return 0
 
 
 def _run(args) -> int:
@@ -127,13 +163,18 @@ def _run(args) -> int:
         if not store.manifest:
             raise ValueError("尚未提取文本，請先執行 extract")
         pipeline.select(store, args.limit)
-        backend = Sakura(SakuraConfig(**{key: getattr(args, key) for key in SakuraConfig.__dataclass_fields__}))
+        backend = _backend(args)
         if not args.dry_run:
             backend.prepare()
         est = pipeline.estimate(store, plugin.control_codes, backend, args.limit)
         print(f"待翻 {est['items']} 筆、{est['characters']:,} 字，快取 {est['cached']} 筆、"
               f"約 {est['batches']} 批，預估 {est['seconds']} 秒（未計重試；離線槽數未經伺服器確認）。")
+        if backend.caps.metered:                         # §6.8: metered backends confirm before spending quota
+            print(f"預估輸入約 {est['input_tokens']:,} token、輸出約 {est['output_tokens']:,} token（粗估）。")
         if args.dry_run:
+            return 0
+        if backend.caps.metered and not args.yes and input("開始翻譯？[y/N] ").strip().lower() != "y":
+            print("已取消，沒有送出任何請求。")
             return 0
         result = pipeline.run(store, plugin.control_codes, backend, args.limit,
                               progress=lambda s: print(f"已翻 {s['translated']}、失敗 {s['failed']}", flush=True))
@@ -183,20 +224,22 @@ def _run(args) -> int:
                 print(f"  略過（遊戲已更新）：{rel}")
     elif args.cmd == "undo":
         if not args.run:
-            for run, n in store.runs().items():
-                print(f"{run}  {n} 筆")
+            for r in core.history(store):
+                print(f"{r['run']}  {r['time']}  {r['by'] or '—'}  {r['items']} 筆（成功 {r['translated']}、"
+                      f"失敗 {r['failed']}）{'  已撤銷' if r['undone'] else ''}")
         else:
             print(f"已撤銷 {store.undo(args.run)} 筆修改。")
+    elif args.cmd == "diagnose":
+        out = core.diagnostics(game, plugin, store, args.output or store.dir / "diagnostics.zip")
+        print(f"已匯出診斷包：{out}（不含遊戲文本、token 與使用者名稱）")
     return 0
 
 
 def _status(store: Store) -> None:
-    recs = store.records.values()
-    by = Counter(r["status"] for r in recs)
-    unc = sum(1 for r in recs if r["status"] == "pending" and "uncertain" in r.get("flags", []))
-    print(f"共 {len(store.records)} 句：待翻 {by['pending'] - unc}、不確定 {unc}（預設不翻）、"
-          f"已翻 {by['translated']}、已審閱 {by['reviewed']}、失敗 {by['failed']}、"
-          f"不翻 {by['skip']}、孤立 {by['orphan']}")
+    c = core.counts(store)
+    print(f"共 {c['total']} 句：待翻 {c['pending']}、不確定 {c['uncertain']}（預設不翻）、"
+          f"已翻 {c['translated']}、已審閱 {c['reviewed']}、失敗 {c['failed']}、"
+          f"不翻 {c['skip']}、孤立 {c['orphan']}")
     print(f"專案資料夾：{store.dir}")
 
 
