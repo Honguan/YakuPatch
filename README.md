@@ -1,8 +1,25 @@
 # YakuPatch
 
-不注入、直接修改遊戲檔案的遊戲翻譯器。設計見 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
+YakuPatch 把日文遊戲翻譯成中文。它直接修改遊戲的文字檔，不注入程式，寫入前會先備份，可以隨時還原。
 
-目前進度：I1（RPG Maker MZ／MV、Sakura 本地翻譯、CLI）完成；I2 階段 A（Codex 後端、Core API、撤銷整次翻譯、診斷包）已實作，GUI 未開始。
+目前支援 RPG Maker MV 與 MZ，翻譯後端有 Sakura（本地模型）與 Codex（實驗性）。
+
+> [!NOTE]
+> 專案仍在開發中。I1（MV/MZ、Sakura、命令列）已完成；I2 階段 A（Codex 後端、Core API、撤銷整次翻譯、診斷包）已完成，GUI 尚未開始。設計見 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
+
+## 功能
+
+- 偵測引擎並提取文本。遊戲已是中文或附中文語系時會停下。
+- 用 Sakura 或 Codex 翻譯，可中斷，重跑時從中斷處接續。
+- 每批譯文都會檢查控制碼、換行數、長度與重複，不合格的不寫入，該句保留原文。
+- 寫回前先預覽，備份後才修改；`restore` 還原，`undo` 撤銷某一次翻譯或匯入。
+- 可以匯出分批檔，交給其他工具或人工翻譯後再匯入。
+
+## 需求
+
+- Python 3.11 以上
+- 使用 Sakura 時：自行啟動、與 OpenAI 相容的 llama-server
+- 使用 Codex 時：有 Codex 額度的 ChatGPT 帳號
 
 ## 安裝
 
@@ -10,52 +27,99 @@
 pip install -e .
 ```
 
-## 使用
+安裝後即可使用 `yakupatch` 指令。沒有安裝時，在專案根目錄用 `python -X utf8 -m yakupatch` 代替。
+
+## 快速開始
 
 ```bash
-yakupatch detect  <遊戲資料夾>          # 偵測引擎
-yakupatch extract <遊戲資料夾>          # 提取文本；遊戲已是中文或附中文語系時會停下，--force 強制
-yakupatch translate <遊戲資料夾> --backend sakura --dry-run  # 離線預估筆數、字數、批次與時間
-yakupatch translate <遊戲資料夾> --backend sakura --limit 20 # 先試譯 20 筆（名稱／系統優先）
-yakupatch translate <遊戲資料夾> --backend sakura            # 翻譯剩餘項目，可中斷續跑
-yakupatch export  <遊戲資料夾>          # 產生 batches/out/part-*.jsonl 與 INSTRUCTIONS.md
-#   填好 dst 後放到 batches/in/
-yakupatch import  <遊戲資料夾>          # 匯入譯文（檢查佔位符、換行等，不合格的寫到 *.rejected.jsonl）
-yakupatch apply   <遊戲資料夾>          # 預覽；加 --yes 才寫入
-yakupatch restore <遊戲資料夾>          # 從 _yakupatch_backup/ 還原
-yakupatch undo    <遊戲資料夾> [run]    # 不給 run 時列出翻譯歷史；給 run 撤銷該次翻譯或匯入
-yakupatch diagnose <遊戲資料夾>         # 匯出診斷包（不含遊戲文本、token、使用者路徑）
-yakupatch status  <遊戲資料夾>
+yakupatch extract   <遊戲資料夾>
+yakupatch translate <遊戲資料夾> --backend sakura --dry-run   # 只預估，不連網
+yakupatch translate <遊戲資料夾> --backend sakura --limit 20  # 先試譯 20 筆
+yakupatch translate <遊戲資料夾> --backend sakura
+yakupatch apply     <遊戲資料夾>                              # 預覽
+yakupatch apply     <遊戲資料夾> --yes                        # 寫入
 ```
 
-專案資料預設放在 `~/.yakupatch/projects`（`--home` 或環境變數 `YAKUPATCH_HOME` 可改）；備份放在遊戲資料夾內 `_yakupatch_backup/`。
+要還原遊戲時執行 `yakupatch restore <遊戲資料夾>`。
 
-Sakura 需先自行啟動 OpenAI 相容的 llama-server（建議監聽 `127.0.0.1`）。預設位址 `http://127.0.0.1:8080/v1`；可用 `--api-base http://區網IP:埠` 改位址，會自動補 `/v1`。啟動翻譯會檢查 `/health`，從 `/props` 讀取每槽 context 與平行數，從 `/v1/models` 讀模型名稱；不會自動啟動或關閉模型。
+## 指令
 
-設定使用 `translate --help` 查看：`--version`（0.9／1.0／galtransl-v1）、`--model`、`--parallel`（只能降低伺服器槽數）、`--timeout`（999 秒）、`--retries`（3，最多 5）、`--max-tokens`（1024）、`--temperature`（0.1）、`--top-p`（0.3）、`--frequency-penalty`（0.05）、`--repeat-threshold`（20）、`--force-glossary`、`--enlarge-kana`。
+| 指令 | 說明 |
+|---|---|
+| `detect` | 偵測引擎 |
+| `extract` | 提取文本；遊戲已是中文時停下，`--force` 強制提取 |
+| `status` | 顯示各狀態的句數與專案資料夾 |
+| `translate` | 翻譯，`--backend sakura\|codex`；`--dry-run` 只預估，`--limit N` 只翻前 N 筆（名稱與系統優先） |
+| `export` | 產生 `batches/out/part-*.jsonl` 與 `INSTRUCTIONS.md` |
+| `import` | 匯入 `batches/in/` 中填好 `dst` 的檔案；不合格的寫到 `*.rejected.jsonl` |
+| `apply` | 預覽寫回；加 `--yes` 才寫入 |
+| `restore` | 從 `_yakupatch_backup/` 還原 |
+| `undo [run]` | 不帶 `run` 列出翻譯歷史；帶 `run` 撤銷該次翻譯或匯入 |
+| `diagnose` | 匯出診斷包，不含遊戲文本、token 或使用者路徑 |
+| `codex login\|logout\|status\|models` | 管理 Codex 帳號 |
 
-常用設定可寫在本機設定檔 `~/.yakupatch/config.json`（有設 `YAKUPATCH_HOME` 時放在該目錄），`sakura` 底下的鍵名與上方參數相同（`-` 可寫成 `_`），命令列參數優先。只有 `translate` 會讀這個檔；格式錯誤或有未知鍵名時 `translate` 會停下並列出可用鍵名，其他指令不受影響：
+每個指令的完整參數請看 `yakupatch <指令> --help`。
+
+## 翻譯後端
+
+### Sakura
+
+先自行啟動 llama-server，建議只監聽 `127.0.0.1`。預設位址是 `http://127.0.0.1:8080/v1`，可用 `--api-base http://<區網IP>:<埠>` 更改，結尾的 `/v1` 會自動補上。
+
+開始翻譯時，YakuPatch 會檢查 `/health`，從 `/props` 讀取每個槽的 context 與平行數，從 `/v1/models` 讀取模型名稱。它不會自動啟動或關閉模型。Sakura 輸出簡體中文，YakuPatch 不做繁簡轉換。
+
+| 參數 | 說明與預設值 |
+|---|---|
+| `--version` | 提示詞版本，`0.9`、`1.0` 或 `galtransl-v1`；預設 `1.0` |
+| `--model` | 預設讀取 `/models` |
+| `--parallel` | 平行數上限，預設讀取 `/props`，只能調低 |
+| `--timeout` | 999 秒 |
+| `--retries` | 3（最多 5） |
+| `--max-tokens` | 1024 |
+| `--temperature` | 0.1 |
+| `--top-p` | 0.3 |
+| `--frequency-penalty` | 0.05 |
+| `--repeat-threshold` | 20 |
+| `--force-glossary` | 每批附上整份術語表 |
+| `--enlarge-kana` | 放大小假名 |
+
+### Codex（實驗性）
+
+```bash
+yakupatch codex login     # 開啟瀏覽器登入 ChatGPT
+yakupatch codex models    # 列出可用模型與推理等級
+yakupatch translate <遊戲資料夾> --backend codex
+yakupatch codex logout
+```
+
+- 預設模型是 `codex models` 清單的第一個，推理等級 `--effort low`，一次送 4 批（`--parallel`）。
+- `--script zh-Hant|zh-Hans` 指定輸出繁體或簡體，預設繁體。
+- 翻譯前會顯示預估的輸入與輸出 token 並詢問是否開始，`--yes` 可略過。
+- 額度用完、登入失效或設定錯誤時會停下。已完成的批次會保存，其餘維持待翻，重跑 `translate` 即可續翻。
+
+> [!WARNING]
+> Codex 使用非公開端點，可能隨時失效。翻譯時遊戲文本會送到 OpenAI（`store: false`）。憑證分段存在系統 keyring（Windows 認證管理員），不讀寫 `~/.codex/auth.json`；`logout` 只刪除 YakuPatch 自己的憑證。
+
+## 設定
+
+專案資料預設放在 `~/.yakupatch/projects`，可用 `--home` 或環境變數 `YAKUPATCH_HOME` 更改。備份放在遊戲資料夾內的 `_yakupatch_backup/`。
+
+Sakura 的常用參數可以寫在 `~/.yakupatch/config.json`（有設 `YAKUPATCH_HOME` 時放在該目錄）。`sakura` 底下的鍵名和命令列參數相同，`-` 可寫成 `_`，命令列參數優先：
 
 ```json
 {"sakura": {"api_base": "http://192.168.1.10:8080/v1"}}
 ```
 
-### Codex（實驗性）
+只有 `translate --backend sakura` 會讀這個檔。檔案格式錯誤或有未知鍵名時，`translate` 會停下並列出可用鍵名，其他指令不受影響。
 
-```bash
-yakupatch codex login                                   # 開瀏覽器登入 ChatGPT
-yakupatch codex models                                  # 列出可用模型與推理強度
-yakupatch translate <遊戲資料夾> --backend codex --effort low --script zh-Hant
-yakupatch codex logout
-```
+## 運作方式
 
-Codex 使用 ChatGPT 帳號的 Codex 額度，走非公開端點，可能隨時失效；翻譯時遊戲文本會送到 OpenAI（`store: false`）。憑證只存在系統 keyring（Windows 認證管理員），分段儲存，不讀寫 `~/.codex/auth.json`；`logout` 只刪 YakuPatch 自己的憑證。翻譯前會顯示預估輸入／輸出 token 並詢問，`--yes` 略過。額度用完、登入失效或設定錯誤會停下，未翻項目保持 pending，重跑即續翻。`--script zh-Hant|zh-Hans` 選輸出繁體或簡體。
-
-名稱譯完會填入 `glossary.tsv` 尚未填寫的種子術語，已填的詞條保持原值。翻譯每批驗證後立即寫入日誌，記錄模型、提示詞版本、錯誤與嘗試次數；成功譯文另存專案 `cache.sqlite3`。續跑跳過已翻／已審閱／不確定的項目；一般 `failed` 可重試，模型明確拒絕的項目不自動重送。驗證失敗不寫入可疑譯文，`apply` 保留原文。Sakura 輸出維持簡體，不做繁簡轉換。
-
-MV 可直接指定遊戲目錄或 `www/`；共用 MZ 的 JSON 解析與寫回。圖片／音訊加密不影響明文 JSON 翻譯，`.rpgmvp` 不會阻擋提取；缺少 System.json 或發現加密／不支援的 JSON 才拒絕，不嘗試解密。
-
-時間及 token 是粗估，未計重試、動態前文和新增術語的影響；`--dry-run` 不連網、不寫檔，使用保守的槽數與未解析模型名稱，快取命中數可能低於實跑。Ctrl+C 保留已提交批次；既有 HTTP 請求可能到 `--timeout` 後才結束。對話過長且單句仍超出預算時標記 `too_long`，保留原文。
+- **術語**：名稱譯完後，會填入 `glossary.tsv` 中尚未填寫的種子術語，已填的詞條保持原值。
+- **紀錄與快取**：每批驗證後立即寫入日誌，記錄模型、提示詞版本、錯誤與嘗試次數。成功的譯文另存在專案的 `cache.sqlite3`。
+- **續跑**：會跳過已翻、已審閱與不確定的項目。一般失敗的項目可以重試，模型明確拒絕翻譯的不會自動重送。
+- **MV 支援**：可以直接指定遊戲目錄或 `www/`，與 MZ 共用 JSON 解析和寫回。圖片或音訊加密不影響明文 JSON 的翻譯。缺少 `System.json`，或 JSON 本身加密、格式不支援時，會拒絕處理，不嘗試解密。
+- **預估**：時間與 token 都是粗估，不計重試、動態前文與新增術語。`--dry-run` 不連網也不寫檔，使用保守的槽數，不解析模型名稱，快取命中數可能比實際少。
+- **中斷**：Ctrl+C 會保留已完成的批次；進行中的 HTTP 請求可能要到 `--timeout` 才結束。單句超出輸入預算時標記 `too_long` 並保留原文。
 
 ## 測試
 
@@ -63,26 +127,30 @@ MV 可直接指定遊戲目錄或 `www/`；共用 MZ 的 JSON 解析與寫回。
 python -X utf8 -m unittest discover -s tests -t tests
 ```
 
-真實 Sakura 與遊戲庫盤點為獨立腳本，不會在 unittest 中連網：
+單元測試不連網。以下腳本需要另外執行：
 
 ```powershell
+# 真實翻譯流程：複製 data/ 與 js/ 到暫存目錄，跑 extract → translate → apply → restore，比對雜湊
 python -X utf8 scripts/test_sakura_real.py '<日文MZ>' '<日文MV>' --output "$env:TEMP/yakupatch-real.json"
+
+# 遊戲庫盤點：只讀，檢查偵測、JSON 往返與語言
 python -X utf8 scripts/audit_games.py 'G:/game' 'D:/Games/TEMP' --output "$env:TEMP/yakupatch-audit.json"
-```
 
-真實測試只複製 `data/` 與 `js/` 到新暫存目錄，執行 extract→translate→apply→restore，檢查原始 data 與還原後副本雜湊。盤點只讀遊戲，檢查偵測、可讀 JSON 往返、語言；加密或不支援的 JSON 明確列為失敗。報告不可寫入受測遊戲庫；這些腳本不啟動遊戲，也不驗證畫面或字型。測試副本保留在輸出記載的暫存路徑，供人工複核。
-
-後端評測（G5）讀 `tests/eval/cases.jsonl`（自編 100 句：控制碼、人名、換行、擬聲詞、選項各 20），輸出 T11 失敗率、佔位符保留率、術語遵循率：
-
-```powershell
+# 後端評測：tests/eval/cases.jsonl 的 100 句，輸出 T11 失敗率、佔位符保留率與術語遵循率
 python -X utf8 scripts/eval_backend.py --backend sakura --output "$env:TEMP/eval-sakura.json"
 python -X utf8 scripts/eval_backend.py --backend codex --output "$env:TEMP/eval-codex.json"
 ```
 
-I1 的實際數字與失敗清單見 [交付報告](docs/I1_REPORT.md)；I2 見 [I2 報告](docs/I2_REPORT.md)。
+- 加密或格式不支援的 JSON 會列為失敗。
+- 報告不能寫進受測的遊戲庫。測試副本保留在報告記載的暫存路徑，方便人工複查。
+- 這些腳本不啟動遊戲，也不檢查畫面或字型。
+
+實測數字與失敗清單見 [I1 報告](docs/I1_REPORT.md) 與 [I2 報告](docs/I2_REPORT.md)。
 
 ## 授權
 
-GPL-3.0-or-later
+本專案以 [GPL-3.0-or-later](https://www.gnu.org/licenses/gpl-3.0.html) 授權。
 
-Codex 登入與請求格式參考 BallonsTranslator 的 `modules/codex.py`（GPL-3.0）。Sakura 提示詞與術語格式參考 [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) 的 `trans_sakura.py`（GPL-3.0）。僅供使用者對合法持有的遊戲做個人翻譯；分享時只分享交換檔，不分享遊戲原始檔案。
+Sakura 提示詞與術語格式參考 [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) 的 `trans_sakura.py`；Codex 登入與請求格式參考同專案的 `modules/codex.py`（兩者皆為 GPL-3.0）。
+
+YakuPatch 僅供翻譯你合法持有的遊戲、個人使用。分享時請只分享交換檔，不要分享遊戲原始檔案。
