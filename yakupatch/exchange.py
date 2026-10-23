@@ -34,6 +34,7 @@ class Store:
         self.manifest: dict = {}
         self.records: dict[str, dict] = {}
         self._journal_lines = 0
+        self.listeners: list = []      # fn(ids | None) after each write; None = everything may have changed
         if (self.dir / "manifest.json").exists():
             self.manifest = json.loads((self.dir / "manifest.json").read_text("utf-8"))
         if (self.dir / "strings.jsonl").exists():
@@ -65,6 +66,7 @@ class Store:
             self._journal_lines += len(items)
             if self._journal_lines >= COMPACT_EVERY:
                 self.compact()
+        self._notify([rid for rid, _ in items])
 
     def replace(self, records: dict[str, dict], manifest: dict) -> None:
         """Used by extraction (E11): write a fresh snapshot and manifest."""
@@ -73,6 +75,11 @@ class Store:
             atomic_write(self.dir / "manifest.json",
                          json.dumps(manifest, ensure_ascii=False, indent=1).encode("utf-8"))
             self.compact()
+        self._notify(None)
+
+    def _notify(self, ids) -> None:
+        for fn in list(self.listeners):
+            fn(ids)
 
     def compact(self) -> None:
         """New snapshot; the journal is archived (not deleted) so runs stay undoable (F21)."""

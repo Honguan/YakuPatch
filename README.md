@@ -2,7 +2,7 @@
 
 不注入、直接修改遊戲檔案的遊戲翻譯器。設計見 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
 
-目前進度：I1（RPG Maker MZ／MV、Sakura 本地翻譯、CLI）。
+目前進度：I1（RPG Maker MZ／MV、Sakura 本地翻譯、CLI）完成；I2 階段 A（Codex 後端、Core API、撤銷整次翻譯、診斷包）已實作，GUI 未開始。
 
 ## 安裝
 
@@ -23,7 +23,8 @@ yakupatch export  <遊戲資料夾>          # 產生 batches/out/part-*.jsonl �
 yakupatch import  <遊戲資料夾>          # 匯入譯文（檢查佔位符、換行等，不合格的寫到 *.rejected.jsonl）
 yakupatch apply   <遊戲資料夾>          # 預覽；加 --yes 才寫入
 yakupatch restore <遊戲資料夾>          # 從 _yakupatch_backup/ 還原
-yakupatch undo    <遊戲資料夾> [run]    # 撤銷一次匯入
+yakupatch undo    <遊戲資料夾> [run]    # 不給 run 時列出翻譯歷史；給 run 撤銷該次翻譯或匯入
+yakupatch diagnose <遊戲資料夾>         # 匯出診斷包（不含遊戲文本、token、使用者路徑）
 yakupatch status  <遊戲資料夾>
 ```
 
@@ -38,6 +39,17 @@ Sakura 需先自行啟動 OpenAI 相容的 llama-server（建議監聽 `127.0.0.
 ```json
 {"sakura": {"api_base": "http://192.168.1.10:8080/v1"}}
 ```
+
+### Codex（實驗性）
+
+```bash
+yakupatch codex login                                   # 開瀏覽器登入 ChatGPT
+yakupatch codex models                                  # 列出可用模型與推理強度
+yakupatch translate <遊戲資料夾> --backend codex --effort low --script zh-Hant
+yakupatch codex logout
+```
+
+Codex 使用 ChatGPT 帳號的 Codex 額度，走非公開端點，可能隨時失效；翻譯時遊戲文本會送到 OpenAI（`store: false`）。憑證只存在系統 keyring（Windows 認證管理員），分段儲存，不讀寫 `~/.codex/auth.json`；`logout` 只刪 YakuPatch 自己的憑證。翻譯前會顯示預估輸入／輸出 token 並詢問，`--yes` 略過。額度用完、登入失效或設定錯誤會停下，未翻項目保持 pending，重跑即續翻。`--script zh-Hant|zh-Hans` 選輸出繁體或簡體。
 
 名稱譯完會填入 `glossary.tsv` 尚未填寫的種子術語，已填的詞條保持原值。翻譯每批驗證後立即寫入日誌，記錄模型、提示詞版本、錯誤與嘗試次數；成功譯文另存專案 `cache.sqlite3`。續跑跳過已翻／已審閱／不確定的項目；一般 `failed` 可重試，模型明確拒絕的項目不自動重送。驗證失敗不寫入可疑譯文，`apply` 保留原文。Sakura 輸出維持簡體，不做繁簡轉換。
 
@@ -60,10 +72,17 @@ python -X utf8 scripts/audit_games.py 'G:/game' 'D:/Games/TEMP' --output "$env:T
 
 真實測試只複製 `data/` 與 `js/` 到新暫存目錄，執行 extract→translate→apply→restore，檢查原始 data 與還原後副本雜湊。盤點只讀遊戲，檢查偵測、可讀 JSON 往返、語言；加密或不支援的 JSON 明確列為失敗。報告不可寫入受測遊戲庫；這些腳本不啟動遊戲，也不驗證畫面或字型。測試副本保留在輸出記載的暫存路徑，供人工複核。
 
-I1 的實際數字與失敗清單見 [交付報告](docs/I1_REPORT.md)。
+後端評測（G5）讀 `tests/eval/cases.jsonl`（自編 100 句：控制碼、人名、換行、擬聲詞、選項各 20），輸出 T11 失敗率、佔位符保留率、術語遵循率：
+
+```powershell
+python -X utf8 scripts/eval_backend.py --backend sakura --output "$env:TEMP/eval-sakura.json"
+python -X utf8 scripts/eval_backend.py --backend codex --output "$env:TEMP/eval-codex.json"
+```
+
+I1 的實際數字與失敗清單見 [交付報告](docs/I1_REPORT.md)；I2 見 [I2 報告](docs/I2_REPORT.md)。
 
 ## 授權
 
 GPL-3.0-or-later
 
-Sakura 提示詞與術語格式參考 [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) 的 `trans_sakura.py`（GPL-3.0）。僅供使用者對合法持有的遊戲做個人翻譯；分享時只分享交換檔，不分享遊戲原始檔案。
+Codex 登入與請求格式參考 BallonsTranslator 的 `modules/codex.py`（GPL-3.0）。Sakura 提示詞與術語格式參考 [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) 的 `trans_sakura.py`（GPL-3.0）。僅供使用者對合法持有的遊戲做個人翻譯；分享時只分享交換檔，不分享遊戲原始檔案。

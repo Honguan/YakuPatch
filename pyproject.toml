@@ -9,7 +9,7 @@ description = "Translate game text by patching game files directly, with backup 
 readme = "README.md"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
-dependencies = ["opencc-python-reimplemented>=0.1.7"]
+dependencies = ["opencc-python-reimplemented>=0.1.7", "keyring>=24"]
 
 [project.urls]
 Repository = "https://github.com/Honguan/YakuPatch"
