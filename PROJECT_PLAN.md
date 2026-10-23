@@ -48,6 +48,7 @@
 6. **自動匹配**：自動辨識引擎、找出需修改的檔案、產生替換檔。
 7. **處理編碼**：自動偵測與轉換，避免亂碼與遊戲崩潰。
 8. **圖形介面**：一般玩家不需要碰命令列。
+9. **下載即用**：最終交付為可下載的 Windows 執行檔；從 GitHub Releases 下載解壓後，雙擊 `YakuPatch.exe` 即可啟動，不需安裝 Python 或任何套件（§15 I6）。
 
 ### 1.3 非目標（第一版不做）
 - 圖片內文字（OCR／重繪）、語音。
@@ -795,7 +796,7 @@ class BackendCaps:
 | 編碼偵測 | `charset-normalizer` | MIT |
 | Unity | `UnityPy` | MIT |
 | 快取 | SQLite（標準函式庫） | 只存全域翻譯快取；譯文以交換檔為準 |
-| 打包 | PyInstaller | 免安裝 `.exe` |
+| 打包 | PyInstaller（onedir） | 免安裝 `YakuPatch.exe`，打包成 zip 放在 GitHub Releases 供下載；onedir 比單檔啟動快，也較少被防毒誤判 |
 | 測試 | `pytest` | — |
 
 ---
@@ -895,11 +896,11 @@ docs/           使用說明、引擎支援表、遊戲規則檔與交換檔格�
 |---|---|---|
 | **I0 骨架** | RPG Maker MZ 單一引擎走完 A→B→C：提取、交換檔（Store 快照 + 日誌）、匯出／匯入分批檔、寫回、備份還原；安全規則；合規測試套件；CLI | MZ 通過合規測試；手填譯文匯入後遊戲可正常顯示並能還原 |
 | **I1 本地翻譯** | 完成（2026-10-23）：MV/MZ 隨機 10 款翻譯寫回，10 款以 `Game.exe` 實機啟動並顯示譯文（使用者確認）；02_mv、06_mz、10_mz restore 後 data 雜湊與原版一致，再 apply 與原譯版一致。已知問題見 `C:\YakuPatchTest\_quality\REPORT.md` | MV/MZ 隨機 3 款可完整翻譯、啟動、還原 |
-| **I2 介面 + Codex** | 進行中（2026-10-23）：階段 A（Core API、工作佇列、Codex 登入與後端、用量預估、撤銷整次翻譯、診斷包、評測集）已實作並通過離線測試；Codex 評測與 3 款 MV/MZ 實機驗收通過；階段 B GUI 未開始。詳見 `docs/I2_REPORT.md` | 一般使用者不碰命令列即可完成全流程；Codex 額度用完時能暫停並續跑 |
+| **I2 介面 + Codex** | 完成（2026-10-23）：階段 A（Core API、工作佇列、Codex 登入與後端、用量預估、撤銷整次翻譯、診斷包、評測集）已實作並通過離線測試；Codex 評測與 3 款 MV/MZ 實機驗收通過；階段 B GUI 已實作，通過離線與 offscreen 測試，並以程式驅動 GUI 完成 3 款 MV/MZ 實機流程（Codex 2、Sakura 1）；使用者親手操作 GUI 驗收通過（2026-10-23，MV 1 款 Sakura 全部翻譯 8,156 句，回報正常）。詳見 `docs/I2_REPORT.md` | 一般使用者不碰命令列即可完成全流程；Codex 額度用完時能暫停並續跑 |
 | **I3 一致性 + 文字腳本引擎** | 術語種子、外部字典（§6.10）、T13 全文 QA、`style.md`、自動換行；Ren'Py、Tyrano | 各引擎隨機 3 款實機通過；QA 能抓出刻意植入的同名異譯 |
 | **I4 封包引擎** | Unity（通用規則 + 3 種框架 + 字型替換）、KiriKiri（patch.xp3） | Unity 隨機 3 款至少 2 款可用且無方塊字；KiriKiri 未加密款可用 |
 | **I5 擴充** | Wolf、Artemis、Godot、CatSystem2、SRPG；CP932 策略 C | 各引擎至少 1 款實機通過 |
-| **I6 發佈** | PyInstaller 打包、文件、v1.0 | 乾淨的 Windows 電腦可直接執行 |
+| **I6 發佈** | PyInstaller 打包成 `YakuPatch.exe`（GUI 入口，含程式圖示與版本資訊）、zip 發佈到 GitHub Releases、使用說明、v1.0 | 在未安裝 Python 的乾淨 Windows 電腦上，從 Releases 下載 zip、解壓後雙擊 `YakuPatch.exe` 即可啟動 GUI，並用隨機 1 款遊戲走完提取→翻譯→寫回→啟動→還原 |
 
 ### 15.1 成功指標
 以使用者遊戲庫（365 款）為基準，每輪疊代結束時量測：
@@ -1010,6 +1011,7 @@ v0.3 審查時找到的缺口。「已定案」表示設計已寫進本企劃；
 ### 已決事項
 | 日期 | 決定 |
 |---|---|
+| 2026-10-23 | 最終交付為可下載、雙擊即可啟動的 `YakuPatch.exe`（PyInstaller onedir zip，發佈於 GitHub Releases），不要求使用者安裝 Python（§1.2、§12、§15 I6） |
 | 2026-10-22 | 各疊代實機驗收改為隨機 3 款（原 I1、I4 為 10 款）；每階段先跑單元／合規測試，再用 3 款走完提取→翻譯→寫回→啟動→還原 |
 | 2026-10-21 | Codex 後端內建，於 I2 實作（§6.6）；分批交換檔仍保留作為替代路徑 |
 | 2026-10-21 | 不做繁簡轉換；Sakura 譯文維持簡體（§6.7） |

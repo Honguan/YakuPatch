@@ -3,12 +3,13 @@ import argparse
 import json
 import sys
 import webbrowser
+from dataclasses import replace
 from collections import Counter
 from pathlib import Path
 
 from . import core, engines, exchange, pipeline, writeback
 from .backends import codex
-from .backends.codex import Codex, CodexConfig
+from .backends.codex import Codex
 from .backends.sakura import Sakura, SakuraConfig
 from .backup import Backup
 from .extract import LanguageGateStop, extract, projects_home
@@ -77,6 +78,15 @@ def main(argv=None) -> int:
             print(f"錯誤：{ex}")
             return 1
         args = ap.parse_args(argv)                       # command line still wins over config.json
+    elif args.cmd == "translate":                        # codex section is shared with the GUI settings
+        try:
+            cfg = core.codex_config()
+        except (TypeError, ValueError) as ex:
+            print(f"錯誤：設定檔 {core.config_path()} 的 codex 設定有誤：{ex}")
+            return 1
+        translate_parser.set_defaults(model=cfg.model, effort=cfg.effort, parallel=cfg.parallel, timeout=cfg.timeout,
+                                      retries=cfg.retries, script=cfg.output_script)
+        args = ap.parse_args(argv)
     try:
         return _codex(args) if args.cmd == "codex" else _run(args)
     except KeyboardInterrupt:
@@ -111,8 +121,8 @@ def _open(args) -> tuple[Path, engines.EnginePlugin, Store]:
 
 def _backend(args):
     if args.backend == "codex":
-        return Codex(CodexConfig(model=args.model, effort=args.effort, parallel=args.parallel or 4,
-                                 timeout=args.timeout, retries=args.retries, output_script=args.script))
+        return Codex(replace(core.codex_config(), model=args.model, effort=args.effort, parallel=args.parallel or 4,
+                             timeout=args.timeout, retries=args.retries, output_script=args.script))
     return Sakura(SakuraConfig(**{key: getattr(args, key) for key in SakuraConfig.__dataclass_fields__}))
 
 
