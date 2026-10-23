@@ -9,7 +9,8 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-from . import __version__, dicts, engines, exchange, extract as extraction, pipeline, translate as text, writeback
+from . import (__version__, dicts, engines, exchange, extract as extraction, pipeline, translate as text, vfs,
+               writeback)
 from .backends.codex import CodexConfig
 from .backends.sakura import SakuraConfig
 from .backup import Backup
@@ -171,7 +172,7 @@ def dict_fill(store: Store) -> int:
 
 def dict_vndb(game: Path, plugin, store: Store) -> int:
     """VNDB character names for this game (sends only the title); new names become glossary candidates."""
-    title = plugin.title(game, Backup(game).original_bytes) or game.name
+    title = plugin.title(game, lambda rel: vfs.read_original(game, rel)) or game.name
     rows = glossary(store)
     known = {r[0] for r in rows}
     added = [[src, "", "", "seed"] for src in dict.fromkeys(r[0] for r in dicts.fetch_vndb(title)) if src not in known
