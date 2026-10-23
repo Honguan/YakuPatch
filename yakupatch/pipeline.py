@@ -142,6 +142,21 @@ def parse(response: str, works: list[Work], prefix: list[str]) -> list[str]:
     return result
 
 
+def parse_ids(response: str, works: list[Work]) -> list[str | None]:
+    """json_ids backends answer {"translations":[{"id","translation"}]}; ids are batch positions. Missing ids -> None."""
+    try:
+        items = json.loads(response)["translations"]
+        found = {}
+        for item in items:
+            key, dst = item["id"], item["translation"]
+            if not isinstance(dst, str) or str(key) in found or str(key) not in {str(i) for i in range(len(works))}:
+                raise ValueError
+            found[str(key)] = dst
+    except (ValueError, KeyError, TypeError):
+        raise ValueError("bad_json") from None
+    return [found.get(str(i)) for i in range(len(works))]
+
+
 def dispatch(works: list[Work], backend, terms: dict, sleep=time.sleep, cancelled=None) -> list[Work]:
     """Workers only return results. A cancelled/incomplete batch never mutates Store."""
     def request(group, context=True, hot=False):
@@ -152,7 +167,8 @@ def dispatch(works: list[Work], backend, terms: dict, sleep=time.sleep, cancelle
             try:
                 for w in group:
                     w.attempts += 1
-                return backend.complete(messages, temperature=min(2, max(0.3, backend.config.temperature + 0.2)) if hot else None)
+                return backend.complete(messages, temperature=min(2, max(0.3, getattr(backend.config, "temperature", 0) + 0.2))
+                                        if hot else None)
             except Transient:
                 if attempt == backend.config.retries:
                     raise
@@ -169,15 +185,18 @@ def dispatch(works: list[Work], backend, terms: dict, sleep=time.sleep, cancelle
             if tokens(backend.messages(group, terms, context=context)) > backend.caps.max_input_tokens:
                 raise TooLong("輸入預算不足")
             response = request(group, context, hot)
-            values = parse(response, group, group[0].context if context else [])
+            values = (parse(response, group, group[0].context if context else []) if backend.caps.io_format == "lines"
+                      else parse_ids(response, group))
             for w, dst in zip(group, values):
-                w.errors = translate.validate(w.text, dst, w.masks, getattr(backend.config, "repeat_threshold", 4))
+                w.errors = (["missing_id"] if dst is None
+                            else translate.validate(w.text, dst, w.masks, getattr(backend.config, "repeat_threshold", 4)))
                 w.result = dst if not w.errors else None
             if not any(w.errors for w in group):
                 return group
         except (TooLong, Refused, Transient, ValueError) as ex:
             reason = ["too_long" if isinstance(ex, TooLong) else "refused" if isinstance(ex, Refused)
-                      else "transient" if isinstance(ex, Transient) else "line_count"]
+                      else "transient" if isinstance(ex, Transient) else "bad_json" if str(ex) == "bad_json"
+                      else "line_count"]
             for w in group:
                 w.errors, w.result = reason, None
             if isinstance(ex, Transient) or (isinstance(ex, Refused) and len(group) == 1):
@@ -194,14 +213,15 @@ def dispatch(works: list[Work], backend, terms: dict, sleep=time.sleep, cancelle
     return solve(works)
 
 
-def run(store: Store, codes: list[str], backend, limit=None, progress=None, sleep=time.sleep) -> dict:
+def run(store: Store, codes: list[str], backend, limit=None, progress=None, sleep=time.sleep, stop=None) -> dict:
+    """`stop` (threading.Event) ends the job between waves; finished batches stay saved, the rest stay pending."""
     if not store.manifest:
         raise ValueError("尚未提取文本，請先執行 extract")
-    if backend.caps.io_format != "lines":
-        raise ConfigError("I1 僅支援 lines 後端")
+    if backend.caps.io_format not in ("lines", "json_ids"):
+        raise ConfigError(f"不支援的後端輸出格式：{backend.caps.io_format}")
     rows = select(store, limit)
     run_id = new_run()
-    stats = {"run": run_id, "translated": 0, "failed": 0, "cached": 0, "errors": Counter()}
+    stats = {"run": run_id, "translated": 0, "failed": 0, "cached": 0, "errors": Counter(), "stopped": False}
     started = time.monotonic()
 
     def save(results, keys, cached=False):
@@ -238,6 +258,9 @@ def run(store: Store, codes: list[str], backend, limit=None, progress=None, slee
         try:
             # Bounded waves avoid queuing the entire game on cancellation.
             for start in range(0, len(groups), backend.caps.max_parallel):
+                if stop is not None and stop.is_set():
+                    stats["stopped"] = True
+                    break
                 futures, keys = [], {}
                 for group in groups[start:start + backend.caps.max_parallel]:
                     refreshed = work_list(store, [store.records[w.id] for w in group], codes, terms)
@@ -268,6 +291,8 @@ def run(store: Store, codes: list[str], backend, limit=None, progress=None, slee
             cancelled.set()
             # shortcut: urllib cannot cancel an in-flight socket, process exit can wait up to --timeout after Ctrl+C.
             pool.shutdown(wait=False, cancel_futures=True)
+        if stats["stopped"]:
+            break
     stats["seconds"] = round(time.monotonic() - started, 3)
     stats["errors"] = dict(stats["errors"])
     return stats

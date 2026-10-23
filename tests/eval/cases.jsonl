@@ -1,0 +1,100 @@
+{"id": "control-00", "category": "control", "src": "\\C[2]伝説の剣\\C[0]を手に入れた！", "speaker": null}
+{"id": "control-01", "category": "control", "src": "\\N[1]は\\I[64]ポーションを使った。", "speaker": null}
+{"id": "control-02", "category": "control", "src": "所持金：\\V[3]\\G", "speaker": null}
+{"id": "control-03", "category": "control", "src": "\\{大きな声で\\}叫んでも無駄だ！", "speaker": null}
+{"id": "control-04", "category": "control", "src": "\\C[6]\\N[2]\\C[0]「待って、まだ話は終わってない」", "speaker": null}
+{"id": "control-05", "category": "control", "src": "ここから先は\\C[2]危険地帯\\C[0]です。", "speaker": null}
+{"id": "control-06", "category": "control", "src": "\\.\\.\\.ええと、何の話だっけ？", "speaker": null}
+{"id": "control-07", "category": "control", "src": "\\I[87]鍵を\\V[12]個持っている。", "speaker": null}
+{"id": "control-08", "category": "control", "src": "\\N[3]のレベルが\\V[5]に上がった！", "speaker": null}
+{"id": "control-09", "category": "control", "src": "\\P[1]が仲間に加わった。", "speaker": null}
+{"id": "control-10", "category": "control", "src": "今日は\\C[3]晴れ\\C[0]、明日は\\C[4]雨\\C[0]。", "speaker": null}
+{"id": "control-11", "category": "control", "src": "\\!少し待ってください。", "speaker": null}
+{"id": "control-12", "category": "control", "src": "\\>早口で話すと噛みそうだ。\\<", "speaker": null}
+{"id": "control-13", "category": "control", "src": "\\C[2]\\I[5]\\C[0]魔法の書を開いた。", "speaker": null}
+{"id": "control-14", "category": "control", "src": "敵の攻撃！\\N[1]は\\V[20]のダメージを受けた。", "speaker": null}
+{"id": "control-15", "category": "control", "src": "\\^", "speaker": null}
+{"id": "control-16", "category": "control", "src": "報酬として\\C[17]金貨\\V[8]枚\\C[0]を受け取った。", "speaker": null}
+{"id": "control-17", "category": "control", "src": "\\N[4]：「\\C[2]約束\\C[0]だよ？」", "speaker": null}
+{"id": "control-18", "category": "control", "src": "扉には\\C[1]赤い印\\C[0]が刻まれている。", "speaker": null}
+{"id": "control-19", "category": "control", "src": "\\V[1]日目の朝が来た。", "speaker": null}
+{"id": "names-00", "category": "names", "src": "アリシア、早くこっちに来て！", "speaker": null, "terms": {"アリシア": "艾莉西亞"}}
+{"id": "names-01", "category": "names", "src": "ゼノンはもう出発したらしい。", "speaker": null, "terms": {"ゼノン": "傑農"}}
+{"id": "names-02", "category": "names", "src": "ルミナ村へようこそ、旅の方。", "speaker": null, "terms": {"ルミナ村": "露米娜村"}}
+{"id": "names-03", "category": "names", "src": "黒曜の塔には近づかないほうがいい。", "speaker": null, "terms": {"黒曜の塔": "黑曜之塔"}}
+{"id": "names-04", "category": "names", "src": "ミスティア王国の騎士団が動き出した。", "speaker": null, "terms": {"ミスティア王国": "米斯緹亞王國"}}
+{"id": "names-05", "category": "names", "src": "私はアリシア。よろしくね。", "speaker": "アリシア", "terms": {"アリシア": "艾莉西亞"}}
+{"id": "names-06", "category": "names", "src": "ゼノン様、ご命令を。", "speaker": null, "terms": {"ゼノン": "傑農"}}
+{"id": "names-07", "category": "names", "src": "ルミナ村の井戸は枯れてしまった。", "speaker": null, "terms": {"ルミナ村": "露米娜村"}}
+{"id": "names-08", "category": "names", "src": "黒曜の塔の最上階に何があるんだ？", "speaker": "ゼノン", "terms": {"ゼノン": "傑農", "黒曜の塔": "黑曜之塔"}}
+{"id": "names-09", "category": "names", "src": "ミスティア王国では魔法が禁じられている。", "speaker": null, "terms": {"ミスティア王国": "米斯緹亞王國"}}
+{"id": "names-10", "category": "names", "src": "アリシアとゼノンは幼なじみだった。", "speaker": null, "terms": {"アリシア": "艾莉西亞", "ゼノン": "傑農"}}
+{"id": "names-11", "category": "names", "src": "この地図、ルミナ村が載ってないぞ。", "speaker": "アリシア", "terms": {"アリシア": "艾莉西亞", "ルミナ村": "露米娜村"}}
+{"id": "names-12", "category": "names", "src": "黒曜の塔が光っている……", "speaker": null, "terms": {"黒曜の塔": "黑曜之塔"}}
+{"id": "names-13", "category": "names", "src": "ミスティア王国の王女が行方不明だって。", "speaker": null, "terms": {"ミスティア王国": "米斯緹亞王國"}}
+{"id": "names-14", "category": "names", "src": "ゼノン、剣を抜け！", "speaker": "アリシア", "terms": {"アリシア": "艾莉西亞", "ゼノン": "傑農"}}
+{"id": "names-15", "category": "names", "src": "アリシアの母はルミナ村の出身だ。", "speaker": null, "terms": {"アリシア": "艾莉西亞", "ルミナ村": "露米娜村"}}
+{"id": "names-16", "category": "names", "src": "黒曜の塔へ行くなら北の橋を渡れ。", "speaker": null, "terms": {"黒曜の塔": "黑曜之塔"}}
+{"id": "names-17", "category": "names", "src": "ゼノンの目的は何だったんだ？", "speaker": null, "terms": {"ゼノン": "傑農"}}
+{"id": "names-18", "category": "names", "src": "ミスティア王国を救えるのは君だけだ。", "speaker": "ゼノン", "terms": {"ゼノン": "傑農", "ミスティア王国": "米斯緹亞王國"}}
+{"id": "names-19", "category": "names", "src": "アリシア、黒曜の塔で待ってる。", "speaker": "ゼノン", "terms": {"アリシア": "艾莉西亞", "ゼノン": "傑農", "黒曜の塔": "黑曜之塔"}}
+{"id": "newlines-00", "category": "newlines", "src": "今日はいい天気ですね。\n散歩でもしませんか？", "speaker": null}
+{"id": "newlines-01", "category": "newlines", "src": "ここは古い神殿だ。\n奥から冷たい風が吹いてくる。", "speaker": null}
+{"id": "newlines-02", "category": "newlines", "src": "やっと見つけた……\nずっと探してたんだよ。", "speaker": null}
+{"id": "newlines-03", "category": "newlines", "src": "宝箱を開けた。\n中は空っぽだった。", "speaker": null}
+{"id": "newlines-04", "category": "newlines", "src": "まさか、あなたが\n犯人だったなんて。", "speaker": null}
+{"id": "newlines-05", "category": "newlines", "src": "旅の準備はできた？\n忘れ物はない？\n出発しよう。", "speaker": null}
+{"id": "newlines-06", "category": "newlines", "src": "この先は行き止まりだ。\n引き返そう。", "speaker": null}
+{"id": "newlines-07", "category": "newlines", "src": "お腹が空いたな。\n何か食べに行こう。", "speaker": null}
+{"id": "newlines-08", "category": "newlines", "src": "昔、この町には\n大きな図書館があった。", "speaker": null}
+{"id": "newlines-09", "category": "newlines", "src": "傷は浅い。\nすぐに治るさ。", "speaker": null}
+{"id": "newlines-10", "category": "newlines", "src": "誰かが見ている気がする。\n気のせいかな。", "speaker": null}
+{"id": "newlines-11", "category": "newlines", "src": "ありがとう。\nこの恩は忘れない。", "speaker": null}
+{"id": "newlines-12", "category": "newlines", "src": "雨が止まない。\n今夜はここで休もう。", "speaker": null}
+{"id": "newlines-13", "category": "newlines", "src": "答えを出すのは\nまだ早い。", "speaker": null}
+{"id": "newlines-14", "category": "newlines", "src": "扉が開かない。\n鍵が必要みたいだ。", "speaker": null}
+{"id": "newlines-15", "category": "newlines", "src": "夢を見ていた。\n懐かしい夢だった。\nもう一度会いたい。", "speaker": null}
+{"id": "newlines-16", "category": "newlines", "src": "静かに！\n足音が聞こえる。", "speaker": null}
+{"id": "newlines-17", "category": "newlines", "src": "この薬を飲めば\n少しは楽になるはずだ。", "speaker": null}
+{"id": "newlines-18", "category": "newlines", "src": "朝になったら\nまた来てください。", "speaker": null}
+{"id": "newlines-19", "category": "newlines", "src": "もう迷わない。\n前に進むだけだ。", "speaker": null}
+{"id": "onomatopoeia-00", "category": "onomatopoeia", "src": "ドキドキが止まらない！", "speaker": null}
+{"id": "onomatopoeia-01", "category": "onomatopoeia", "src": "ザーザーと雨が降っている。", "speaker": null}
+{"id": "onomatopoeia-02", "category": "onomatopoeia", "src": "ガタンッ！", "speaker": null}
+{"id": "onomatopoeia-03", "category": "onomatopoeia", "src": "うわぁぁぁっ！", "speaker": null}
+{"id": "onomatopoeia-04", "category": "onomatopoeia", "src": "えへへ、照れちゃうな。", "speaker": null}
+{"id": "onomatopoeia-05", "category": "onomatopoeia", "src": "ゴゴゴゴ……", "speaker": null}
+{"id": "onomatopoeia-06", "category": "onomatopoeia", "src": "ふむふむ、なるほど。", "speaker": null}
+{"id": "onomatopoeia-07", "category": "onomatopoeia", "src": "キラキラ光る石を見つけた。", "speaker": null}
+{"id": "onomatopoeia-08", "category": "onomatopoeia", "src": "ぐーぐー……", "speaker": null}
+{"id": "onomatopoeia-09", "category": "onomatopoeia", "src": "はぁ……疲れた。", "speaker": null}
+{"id": "onomatopoeia-10", "category": "onomatopoeia", "src": "ピンポーン", "speaker": null}
+{"id": "onomatopoeia-11", "category": "onomatopoeia", "src": "ドンドンと扉を叩く音がする。", "speaker": null}
+{"id": "onomatopoeia-12", "category": "onomatopoeia", "src": "くすくす笑う声が聞こえた。", "speaker": null}
+{"id": "onomatopoeia-13", "category": "onomatopoeia", "src": "ひゃっ！冷たい！", "speaker": null}
+{"id": "onomatopoeia-14", "category": "onomatopoeia", "src": "わくわくするね！", "speaker": null}
+{"id": "onomatopoeia-15", "category": "onomatopoeia", "src": "シーン……", "speaker": null}
+{"id": "onomatopoeia-16", "category": "onomatopoeia", "src": "ぷんぷん！もう知らない！", "speaker": null}
+{"id": "onomatopoeia-17", "category": "onomatopoeia", "src": "ゴロゴロと雷が鳴った。", "speaker": null}
+{"id": "onomatopoeia-18", "category": "onomatopoeia", "src": "ガチャリと鍵が開いた。", "speaker": null}
+{"id": "onomatopoeia-19", "category": "onomatopoeia", "src": "むにゃむにゃ……あと五分……", "speaker": null}
+{"id": "choices-00", "category": "choices", "src": "はい", "speaker": null}
+{"id": "choices-01", "category": "choices", "src": "いいえ", "speaker": null}
+{"id": "choices-02", "category": "choices", "src": "話を聞く", "speaker": null}
+{"id": "choices-03", "category": "choices", "src": "立ち去る", "speaker": null}
+{"id": "choices-04", "category": "choices", "src": "買う", "speaker": null}
+{"id": "choices-05", "category": "choices", "src": "売る", "speaker": null}
+{"id": "choices-06", "category": "choices", "src": "やめる", "speaker": null}
+{"id": "choices-07", "category": "choices", "src": "戦う", "speaker": null}
+{"id": "choices-08", "category": "choices", "src": "逃げる", "speaker": null}
+{"id": "choices-09", "category": "choices", "src": "調べる", "speaker": null}
+{"id": "choices-10", "category": "choices", "src": "宿に泊まる", "speaker": null}
+{"id": "choices-11", "category": "choices", "src": "もう一度聞く", "speaker": null}
+{"id": "choices-12", "category": "choices", "src": "セーブする", "speaker": null}
+{"id": "choices-13", "category": "choices", "src": "タイトルに戻る", "speaker": null}
+{"id": "choices-14", "category": "choices", "src": "仲間にする", "speaker": null}
+{"id": "choices-15", "category": "choices", "src": "断る", "speaker": null}
+{"id": "choices-16", "category": "choices", "src": "左の道へ", "speaker": null}
+{"id": "choices-17", "category": "choices", "src": "右の道へ", "speaker": null}
+{"id": "choices-18", "category": "choices", "src": "様子を見る", "speaker": null}
+{"id": "choices-19", "category": "choices", "src": "助ける", "speaker": null}
