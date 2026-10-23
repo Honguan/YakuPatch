@@ -11,8 +11,7 @@ from yakupatch import writeback
 
 from helpers import FIXTURES, copy_game, snapshot
 
-CASES = [("rpgmaker-mz", "mz_min")]
-OTHER_FIXTURES = ["mv_min"]
+CASES = [("rpgmaker-mz", "mz_min"), ("rpgmaker-mv", "mv_min")]
 
 
 class Conformance(unittest.TestCase):
@@ -55,7 +54,9 @@ class Conformance(unittest.TestCase):
     def test_detect(self):
         for plugin, game in self.each():
             self.assertGreaterEqual(plugin.detect(game), 0.9)
-            for other in OTHER_FIXTURES:
+            for name, other in CASES:
+                if name == plugin.name:
+                    continue
                 self.assertLessEqual(plugin.detect(FIXTURES / other), 0.3)
 
     def test_writes_stay_inside_game_and_project(self):
