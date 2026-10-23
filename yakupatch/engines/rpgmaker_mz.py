@@ -94,6 +94,10 @@ class RpgMakerMZ(EnginePlugin):
     def render(self, rel: str, text: str, repl: dict[str, str]) -> str:
         return _render(text, repl)
 
+    def wrap_rule(self, kind: str) -> bool:
+        # Message windows never wrap; a newline inside a 401 line breaks it and overflow pages automatically.
+        return kind == "dialogue"
+
 
 def _render(text: str, repl: dict[str, str]) -> str:
     flat, nested = {}, {}
