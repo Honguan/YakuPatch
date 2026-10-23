@@ -179,6 +179,14 @@ class Gui(unittest.TestCase):
         win.save_style()
         self.assertEqual(core.style(store), "語氣輕鬆")
 
+    def test_settings_dictionary_tab_lists_sources(self):
+        from yakupatch import dicts
+        from yakupatch.gui.settings import SettingsDialog
+        with patch.object(SettingsDialog, "_account", return_value=""):
+            dlg = SettingsDialog(self.win, 3)
+        self.assertEqual(dlg.dict_table.rowCount(), len(dicts.SOURCES))
+        self.assertEqual(dlg.dict_table.item(0, 2).text(), "查詢後建立")
+
     def test_usage_limit_pauses_with_action_and_resumes(self):
         win = self.win
         win.extract()

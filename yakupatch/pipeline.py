@@ -47,7 +47,9 @@ def select(store: Store, limit: int | None = None, only=None) -> list[dict]:
 def glossary(store: Store) -> dict:
     path = store.dir / "glossary.tsv"
     rows = [line.split("\t") for line in path.read_text("utf-8").splitlines()[1:]] if path.exists() else []
-    return {r[0]: (r[1], r[2] if len(r) > 2 else "") for r in rows if len(r) > 1 and r[1]}
+    # Dictionary suggestions (source dict:*) are unconfirmed until the user ticks them (§6.10), so they are not enforced.
+    return {r[0]: (r[1], r[2] if len(r) > 2 else "") for r in rows
+            if len(r) > 1 and r[1] and not (len(r) > 3 and r[3].startswith("dict:"))}
 
 
 def style(store: Store) -> str:

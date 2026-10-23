@@ -7,7 +7,8 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QComboBox, QFileDialog, QFormLayout, QGridLayout,
-                               QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+                               QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
+                               QListWidgetItem,
                                QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSizePolicy,
                                QSpinBox, QSplitter, QTableView, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
                                QWidget)
@@ -230,6 +231,12 @@ class MainWindow(QMainWindow):
                            (tr("重新載入"), self.load_glossary), (tr("儲存"), self.save_glossary)):
             row.addWidget(QPushButton(text, clicked=slot))
         v.addLayout(row)
+        row = QHBoxLayout()
+        for text, slot in ((tr("查字典"), self.gloss_lookup), (tr("VNDB 角色名單"), self.gloss_vndb),
+                           (tr("Wikidata 查譯名"), self.gloss_wikidata), (tr("字典設定"), lambda: self.open_settings(3))):
+            row.addWidget(QPushButton(text, clicked=slot))
+        v.addLayout(row)
+        v.addWidget(QLabel(tr("字典譯名只是候選（來源 dict:…），勾選「已確認」後才會要求翻譯使用。")))
         v.addWidget(QLabel(tr("翻譯進行中術語表為唯讀。")))
         style = QGroupBox(tr("翻譯風格 style.md（人稱、敬語、語氣、專有名詞規則；只有 Codex 會使用）"))
         s = QVBoxLayout(style)
@@ -618,6 +625,49 @@ class MainWindow(QMainWindow):
         for r in rows:
             self._gloss_row(r)
         self.style_edit.setPlainText(core.style(self.current[2]))
+
+    def gloss_lookup(self):
+        rows = sorted({i.row() for i in self.gloss.selectedIndexes()})
+        if not rows:
+            return
+        term = self.gloss.item(rows[0], 0).text().strip()
+        hits = core.dicts.lookup(term)
+        if not hits:
+            QMessageBox.information(self, "YakuPatch", tr("本地字典查無「{}」。可先在「字典設定」下載字典，"
+                                                          "或用 VNDB／Wikidata 查詢。").format(term))
+            return
+        labels = [f"{h['dst'] or '—'}　{h['reading']} {h['type']} {h['lang']}　[{h['source']}]" for h in hits]
+        choice, ok = QInputDialog.getItem(self, tr("查字典：{}").format(term), tr("選擇要填入的候選"), labels, 0, False)
+        if ok:
+            h = hits[labels.index(choice)]
+            if h["dst"]:
+                self.gloss.item(rows[0], 1).setText(h["dst"])
+            note = "；".join(x for x in (h["reading"], h["type"]) if x)
+            if note and not self.gloss.item(rows[0], 2).text():
+                self.gloss.item(rows[0], 2).setText(note)
+            self.gloss.item(rows[0], 3).setText(f"dict:{h['source']}")
+
+    def _gloss_network(self, fn, label, what):
+        if not self.key or QMessageBox.question(self, "YakuPatch", what) != QMessageBox.Yes:
+            return
+        game, plugin, store = self.current
+
+        def done(job):
+            if job.error:
+                QMessageBox.warning(self, "YakuPatch", tr("{} 失敗：{}").format(label, job.error))
+                return
+            self.load_glossary()
+            self.statusBar().showMessage(tr("{}：更新 {} 筆候選").format(label, job.result), 8000)
+
+        self.run_bg(lambda job: fn(game, plugin, store), done, label)
+
+    def gloss_vndb(self):
+        self._gloss_network(core.dict_vndb, tr("VNDB 角色名單"),
+                            tr("會把這款遊戲的標題送到 VNDB（vndb.org）查詢角色名單，資料以 ODbL 授權。繼續嗎？"))
+
+    def gloss_wikidata(self):
+        self._gloss_network(lambda game, plugin, store: core.dict_wikidata(store), tr("Wikidata 查譯名"),
+                            tr("會把尚無譯名的術語候選送到 Wikidata（wikidata.org）查詢中文名稱。繼續嗎？"))
 
     def save_style(self):
         if self.key:
