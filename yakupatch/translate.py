@@ -72,6 +72,38 @@ def validate(src: str, dst: str, masks: dict[str, str], repeat_threshold: int = 
     return errors
 
 
+_BREAK = set("、。，．,.！？!?…‥」』）)】〉》 　")
+_UNIT = re.compile(r"<\d+>|⟦\d+⟧|.", re.S)
+
+
+def join_lines(lines: list[str]) -> str:
+    """One message broken mid-sentence, as one line: CJK lines join directly, others with a space."""
+    out = lines[0]
+    for line in lines[1:]:
+        out += ("" if not out or not line or not (out[-1].isascii() and line[0].isascii()) else " ") + line
+    return out
+
+
+def resplit(dst: str, lines: list[str]) -> str | None:
+    """Break a one-line translation of `lines` back into as many lines, sized like the source lines; each cut moves
+    to the nearest punctuation if one is close. Placeholders are never cut. None when there are too few characters."""
+    units = _UNIT.findall(dst)
+    k, n = len(lines), len(units)
+    if n < k:
+        return None
+    weights = [max(1, len(line)) for line in lines]
+    total, acc, prev, cuts = sum(weights), 0, 0, []
+    span = max(2, n // (2 * k))
+    for i in range(k - 1):
+        acc += weights[i]
+        lo, hi = prev + 1, n - (k - 1 - i)
+        target = min(max(round(n * acc / total), lo), hi)
+        near = [c for d in range(span + 1) for c in (target - d, target + d) if lo <= c <= hi and units[c - 1] in _BREAK]
+        prev = near[0] if near else target
+        cuts.append(prev)
+    return "\n".join("".join(units[a:b]).strip() or "".join(units[a:b]) for a, b in zip([0] + cuts, cuts + [n]))
+
+
 def postprocess(dst: str, masks: dict[str, str], pad: tuple[str, str]) -> str:
     """T12: restore control codes and surrounding whitespace. No Simplified/Traditional conversion."""
     return pad[0] + unmask(dst, masks) + pad[1]
