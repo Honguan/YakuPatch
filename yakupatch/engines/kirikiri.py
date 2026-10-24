@@ -81,7 +81,7 @@ class KiriKiri(Tyrano):
                 return m.group(1).strip("\"'")
         return ""
 
-    def decode(self, rel: str, raw: bytes) -> tuple[str, dict]:
+    def decode(self, rel: str, raw: bytes, game_dir: Path | None = None) -> tuple[str, dict]:
         if raw[:2] == b"\xfe\xfe":
             raise ValueError(f"腳本使用吉里吉里簡易加密，尚未支援：{rel}")
         try:
