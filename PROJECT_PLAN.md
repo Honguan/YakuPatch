@@ -2,9 +2,12 @@
 
 > 開源、不注入的遊戲文本翻譯工具：提取遊戲文本 → 本地模型或 Codex 訂閱翻譯 → 直接寫回遊戲檔案，全程備份且可一鍵還原。
 
-- 版本：v0.4（企劃草案，第四次疊代）
-- 日期：2026-10-21
+- 版本：v0.5（企劃草案，第五次疊代）
+- 日期：2026-10-24
 - 授權：GPL-3.0（理由見 §13）
+
+**v0.5 變更摘要**
+- 發佈方式改為參考 BallonsTranslator 的「安裝包一鍵啟動」：免設定壓縮包內含 Python 嵌入版，解壓後雙擊 `launch_win.bat` 即可啟動；另提供一行 PowerShell 安裝腳本。取代原本的 PyInstaller 單一執行檔（§1.2、§12、§15 I6）。
 
 **v0.4 變更摘要**
 - 新增語言預檢（L1）：遊戲已是中文或內建中文語言包時不翻譯；可分辨繁體與簡體。已用使用者遊戲庫實測，抽得到文字的 102 款中有 36 款已是中文（§5.1）。
@@ -48,7 +51,7 @@
 6. **自動匹配**：自動辨識引擎、找出需修改的檔案、產生替換檔。
 7. **處理編碼**：自動偵測與轉換，避免亂碼與遊戲崩潰。
 8. **圖形介面**：一般玩家不需要碰命令列。
-9. **下載即用**：最終交付為可下載的 Windows 執行檔；從 GitHub Releases 下載解壓後，雙擊 `YakuPatch.exe` 即可啟動，不需安裝 Python 或任何套件（§15 I6）。
+9. **下載即用**：最終交付為可下載的 Windows 安裝包，參考 BallonsTranslator：從 GitHub Releases 下載免設定壓縮包，解壓後雙擊 `launch_win.bat` 即可啟動，不需自行安裝 Python 或任何套件；也可用一行 PowerShell 指令自動安裝（§12、§15 I6）。
 
 ### 1.3 非目標（第一版不做）
 - 圖片內文字（OCR／重繪）、語音。
@@ -796,8 +799,23 @@ class BackendCaps:
 | 編碼偵測 | `charset-normalizer` | MIT |
 | Unity | `UnityPy` | MIT |
 | 快取 | SQLite（標準函式庫） | 只存全域翻譯快取；譯文以交換檔為準 |
-| 打包 | PyInstaller（onedir） | 免安裝 `YakuPatch.exe`，打包成 zip 放在 GitHub Releases 供下載；onedir 比單檔啟動快，也較少被防毒誤判 |
+| 打包 | Python 嵌入版（embeddable package）+ 啟動腳本，參考 BallonsTranslator | 見 §12.1；直接執行原始碼，不經 PyInstaller 凍結，原生模組（UnityPy、TypeTreeGeneratorAPI、PySide6）不會漏打包，防毒誤判較少，更新只需替換程式資料夾 |
 | 測試 | `pytest` | — |
+
+### 12.1 安裝包與一鍵啟動
+參考 BallonsTranslator 的兩種安裝方式，兩者結果相同，都在使用者選的資料夾內自成一體，不寫登錄檔、不動系統 Python：
+
+| 方式 | 使用者操作 | 內容 |
+|---|---|---|
+| **A. 免設定壓縮包**（主要） | 從 GitHub Releases 下載 `YakuPatch_win.zip`，解壓後雙擊 `launch_win.bat` | 內含 Python 3.12 嵌入版（`runtime/`）、已安裝的全部依賴、程式原始碼（`yakupatch/`）、`launch_win.bat` |
+| **B. 一鍵安裝腳本** | PowerShell 執行 `irm https://raw.githubusercontent.com/Honguan/YakuPatch/main/scripts/install.ps1 \| iex`（或在 cmd 以 `powershell -NoProfile -ExecutionPolicy Bypass -Command "..."` 執行） | 在目前資料夾下載 Python 嵌入版與程式碼，依鎖定版本的 `requirements.lock` 安裝依賴，建立 `launch_win.bat`，完成後自動啟動 |
+
+- **啟動腳本** `launch_win.bat`：用 `runtime\python.exe` 執行 `python -m yakupatch.gui`；啟動時檢查核心依賴，缺少或版本不符時提示並可一鍵補裝。選用功能需要的額外套件，等使用者第一次用到時才提示安裝。
+- **使用者資料分離**：專案、設定、字典放在 `%USERPROFILE%\.yakupatch`（可改），更新或刪除程式資料夾不會影響。
+- **更新**：下載新版壓縮包覆蓋程式資料夾，或用安裝腳本重新執行；GUI 啟動時可檢查 GitHub Releases 是否有新版，只提示，不自動下載。
+- **命令列**：同一個 `runtime\python.exe -m yakupatch ...` 可直接使用 CLI，另附 `yakupatch.bat` 包裝。
+- **支援範圍**：Windows 10／11 64 位元。不支援 Windows 7。缺少 Microsoft Visual C++ Redistributable 時，啟動腳本要給出可理解的錯誤和下載說明。
+- **建置**：GitHub Actions 在 tag 時下載 Python 嵌入版、安裝 `requirements.lock`、複製原始碼，壓成 zip 上傳 Releases；`install.ps1` 與壓縮包使用同一份鎖定清單。
 
 ---
 
@@ -900,7 +918,7 @@ docs/           使用說明、引擎支援表、遊戲規則檔與交換檔格�
 | **I3 一致性 + 文字腳本引擎** | 已實作（2026-10-23）：術語種子、外部字典（§6.10）、T13 全文 QA、`style.md`、自動換行；Ren'Py、Tyrano。實機驗收：Tyrano 3 款、Ren'Py 1 款（遊戲庫只有 1 款日文且無中文的 Ren'Py）寫回後讀回全為譯文，Ren'Py `compile` 無錯、0 句對話缺譯；QA 在 3 款抓到植入的同名異譯；4 款以 Codex 真實譯文重跑後，使用者實機檢查通過。詳見 `docs/I3_REPORT.md` | 各引擎隨機 3 款實機通過；QA 能抓出刻意植入的同名異譯 |
 | **I4 封包引擎** | Unity（通用規則 + 3 種框架 + 字型替換）、KiriKiri（patch.xp3） | Unity 隨機 3 款至少 2 款可用且無方塊字；KiriKiri 未加密款可用 |
 | **I5 擴充** | Wolf、Artemis、Godot、CatSystem2、SRPG；CP932 策略 C | 各引擎至少 1 款實機通過 |
-| **I6 發佈** | PyInstaller 打包成 `YakuPatch.exe`（GUI 入口，含程式圖示與版本資訊）、zip 發佈到 GitHub Releases、使用說明、v1.0 | 在未安裝 Python 的乾淨 Windows 電腦上，從 Releases 下載 zip、解壓後雙擊 `YakuPatch.exe` 即可啟動 GUI，並用隨機 1 款遊戲走完提取→翻譯→寫回→啟動→還原 |
+| **I6 發佈** | 安裝包一鍵啟動（§12.1）：免設定壓縮包 `YakuPatch_win.zip`（Python 嵌入版 + 依賴 + `launch_win.bat`）、一行 PowerShell 安裝腳本 `install.ps1`、依賴檢查與補裝、GitHub Actions 自動建置、使用說明、v1.0 | 在未安裝 Python 的乾淨 Windows 10／11 電腦上：壓縮包解壓後雙擊 `launch_win.bat`、以及執行安裝腳本，兩種方式都能啟動 GUI，並用隨機 1 款遊戲走完提取→翻譯→寫回→啟動→還原 |
 
 ### 15.1 成功指標
 以使用者遊戲庫（365 款）為基準，每輪疊代結束時量測：
@@ -1011,7 +1029,8 @@ v0.3 審查時找到的缺口。「已定案」表示設計已寫進本企劃；
 ### 已決事項
 | 日期 | 決定 |
 |---|---|
-| 2026-10-23 | 最終交付為可下載、雙擊即可啟動的 `YakuPatch.exe`（PyInstaller onedir zip，發佈於 GitHub Releases），不要求使用者安裝 Python（§1.2、§12、§15 I6） |
+| 2026-10-24 | 發佈改為 BallonsTranslator 式安裝包一鍵啟動：免設定壓縮包（Python 嵌入版，雙擊 `launch_win.bat`）＋一行 PowerShell 安裝腳本，取代 2026-10-23 的 PyInstaller `YakuPatch.exe`（§12.1、§15 I6） |
+| 2026-10-23 | ~~最終交付為可下載、雙擊即可啟動的 `YakuPatch.exe`（PyInstaller onedir zip，發佈於 GitHub Releases），不要求使用者安裝 Python~~（已由 2026-10-24 取代） |
 | 2026-10-22 | 各疊代實機驗收改為隨機 3 款（原 I1、I4 為 10 款）；每階段先跑單元／合規測試，再用 3 款走完提取→翻譯→寫回→啟動→還原 |
 | 2026-10-21 | Codex 後端內建，於 I2 實作（§6.6）；分批交換檔仍保留作為替代路徑 |
 | 2026-10-21 | 不做繁簡轉換；Sakura 譯文維持簡體（§6.7） |
