@@ -7,7 +7,9 @@ from .base import EnginePlugin, Segment
 
 # Loose content roots; "resources/app.asar" may also be an already-extracted folder.
 _ROOTS = ("", "resources/app/", "resources/app.asar/")
-_TAG = re.compile(r"\[\[|\[[^\[\]]*\]")                       # "[[" is a literal bracket in text
+# "[[" is a literal bracket in text; quoted attribute values may hold brackets: [eval exp="sf.cg[1] = 1"]
+_TAG_RE = r"""\[\[|\[(?:"[^"]*"|'[^']*'|[^\[\]"'])*\]|\[[^\[\]]*\]"""
+_TAG = re.compile(_TAG_RE)
 _NAME = re.compile(r"^[\[@]\s*([\w-]+)")
 _ATTR = re.compile(r"""(\w+)\s*=\s*("[^"]*"|'[^']*'|[^\s\]"']+)""")
 _LOC = re.compile(r"^L(\d+)(?:(#)|@(\d+)\.(\w+))?$")
@@ -43,7 +45,7 @@ class Tyrano(EnginePlugin):
     name = "tyrano"
     version = "1.0.0"
     default_encoding = "cp932"
-    control_codes = [r"\[\[", r"\[[^\[\]]*\]"]
+    control_codes = [_TAG_RE]
 
     def detect(self, game_dir: Path) -> float:
         return 1.0 if _root(game_dir) is not None else 0.0
@@ -106,7 +108,7 @@ class Tyrano(EnginePlugin):
                 if tag_name in _BLOCKS and not re.search(r"\[\s*" + _BLOCKS[tag_name] + r"\b", s):
                     until = _BLOCKS[tag_name]
                 for a in _ATTR.finditer(tag[m.end():]):
-                    kind = _TEXT_ATTRS.get((tag_name, a.group(1)))
+                    kind = self.attr_kind(tag_name, a.group(1))
                     if kind and _unquote(a.group(2))[:1] not in "&%":   # &expr / %macro_param are not text
                         out.append(Segment(f"L{i}@{k}.{a.group(1)}", kind, _unquote(a.group(2))))
             body = line[len(line) - len(line.lstrip()):]
@@ -120,6 +122,9 @@ class Tyrano(EnginePlugin):
             else:
                 group = None
         return out
+
+    def attr_kind(self, tag: str, attr: str) -> str | None:
+        return _TEXT_ATTRS.get((tag, attr))
 
     def render(self, rel: str, text: str, repl: dict[str, str]) -> str:
         lines = text.split("\n")

@@ -274,7 +274,7 @@ class RenPy(EnginePlugin):
                 return m.group(2) if m else source
         return ""
 
-    def decode(self, rel: str, raw: bytes) -> tuple[str, dict]:
+    def decode(self, rel: str, raw: bytes, game_dir: Path | None = None) -> tuple[str, dict]:
         try:
             items = entries(load_rpyc(raw))
         except (pickle.UnpicklingError, zlib.error, EOFError, struct.error, AttributeError, TypeError) as ex:
@@ -284,7 +284,8 @@ class RenPy(EnginePlugin):
     def parse(self, rel: str, text: str) -> list[Segment]:
         return [Segment(e["loc"], e["kind"], e["text"], e.get("speaker")) for e in json.loads(text)]
 
-    def outputs(self, texts: dict[str, str], repl: dict[str, dict[str, str]]) -> dict[str, tuple[bytes, int]]:
+    def outputs(self, texts: dict[str, str], repl: dict[str, dict[str, str]],
+                game_dir: Path | None = None) -> dict[str, tuple[bytes, int]]:
         files, strings = {}, {}
         for rel, r in repl.items():
             blocks = []

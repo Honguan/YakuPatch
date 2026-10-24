@@ -151,6 +151,98 @@ class Rpa:
         return prefix + data
 
 
+XP3_MAGIC = b"XP3\r\n \n\x1a\x8b\x67\x01"
+
+
+class Xp3:
+    """KiriKiri archive (read; write() builds a new one): magic, u64 index offset, then a chain of index blocks
+    [u8 flag][u64 size | u64 packed, u64 size] where flag&7 is 0 raw / 1 zlib and flag&0x80 means "an u64 offset
+    of the next block follows" (the 2.32+ cushion header at 0x17). The index holds "File" chunks with "info"
+    (u32 flags, u64 size, u64 packed, u16 name length, UTF-16LE name) and "segm" (u32 flags, u64 offset, u64
+    size, u64 packed; flags&7 1 = zlib). Encrypted archives decode to garbage: callers check the text."""
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        self.files: dict[str, list[tuple[int, int, int, int]]] = {}
+        with open(self.path, "rb") as f:
+            if f.read(11) != XP3_MAGIC:
+                raise ValueError("不是 XP3 封包")
+            offset, = struct.unpack("<Q", f.read(8))
+            index = b""
+            for _ in range(16):
+                f.seek(offset)
+                flag = f.read(1)[0]
+                if flag & 7 == 1:
+                    packed, size = struct.unpack("<QQ", f.read(16))
+                    if size > MAX_FILE_BYTES:
+                        raise ValueError("XP3 索引過大")
+                    index = zlib.decompress(f.read(packed))
+                elif flag & 7 == 0:
+                    size, = struct.unpack("<Q", f.read(8))
+                    if size > MAX_FILE_BYTES:
+                        raise ValueError("XP3 索引過大")
+                    index = f.read(size)
+                else:
+                    raise ValueError("不支援的 XP3 索引格式")
+                if not flag & 0x80:
+                    break
+                offset, = struct.unpack("<Q", f.read(8))
+            else:
+                raise ValueError("XP3 索引鏈過長")
+        for tag, body in _chunks(index):
+            if tag != b"File":
+                continue                        # KiriKiri Z hashed names ("Hnfn", "eliF") are not supported
+            name, segs = None, []
+            for sub, data in _chunks(body):
+                if sub == b"info":
+                    n, = struct.unpack("<H", data[20:22])
+                    name = data[22:22 + 2 * n].decode("utf-16-le")
+                elif sub == b"segm":
+                    segs = [struct.unpack("<IQQQ", data[i:i + 28]) for i in range(0, len(data) - 27, 28)]
+            if name is not None:
+                self.files[_inner_ok(name.replace("\\", "/"))] = segs
+
+    def read(self, inner: str) -> bytes:
+        out = []
+        with open(self.path, "rb") as f:
+            for flags, offset, size, packed in self.files[inner]:
+                if size > MAX_FILE_BYTES or packed > MAX_FILE_BYTES:
+                    raise UnsafePath(f"檔案超過大小上限：{inner}")
+                f.seek(offset)
+                data = f.read(packed)
+                out.append(zlib.decompress(data) if flags & 7 == 1 else data)
+        data = b"".join(out)
+        if len(data) > MAX_FILE_BYTES:
+            raise UnsafePath(f"檔案超過大小上限：{inner}")
+        return data
+
+    @staticmethod
+    def write(files: dict[str, bytes]) -> bytes:
+        """Uncompressed archive with a zlib index, the layout KiriKiri's own releaser writes."""
+        body, index = bytearray(), bytearray()
+        start = 11 + 8
+        for name, data in files.items():
+            n = name.encode("utf-16-le")
+            info = struct.pack("<IQQH", 0, len(data), len(data), len(name)) + n
+            segm = struct.pack("<IQQQ", 0, start + len(body), len(data), len(data))
+            adlr = struct.pack("<I", zlib.adler32(data))
+            chunk = b"".join(t + struct.pack("<Q", len(d)) + d for t, d in
+                             ((b"info", info), (b"segm", segm), (b"adlr", adlr)))
+            index += b"File" + struct.pack("<Q", len(chunk)) + chunk
+            body += data
+        packed = zlib.compress(bytes(index))
+        return XP3_MAGIC + struct.pack("<Q", start + len(body)) + bytes(body) + \
+            b"\x01" + struct.pack("<QQ", len(packed), len(index)) + packed
+
+
+def _chunks(data: bytes):
+    i = 0
+    while i + 12 <= len(data):
+        size, = struct.unpack("<Q", data[i + 4:i + 12])
+        yield data[i:i + 4], data[i + 12:i + 12 + size]
+        i += 12 + size
+
+
 def _integrity(data: bytes) -> dict:
     return {"algorithm": "SHA256", "hash": hashlib.sha256(data).hexdigest(), "blockSize": BLOCK,
             "blocks": [hashlib.sha256(data[i:i + BLOCK]).hexdigest() for i in range(0, max(len(data), 1), BLOCK)]}
@@ -160,6 +252,8 @@ def open_container(game_dir: Path, outer: str, backup: Backup | None = None):
     path = safe_path(game_dir, outer)
     if outer.lower().endswith(".rpa"):
         return Rpa(path)
+    if outer.lower().endswith(".xp3"):
+        return Xp3(path)
     if not outer.lower().endswith(".asar"):
         raise ValueError(f"不支援的封包格式：{outer}")
     head = (backup or Backup(game_dir)).original_head(outer)
@@ -181,6 +275,8 @@ def read_current(game_dir: Path, rel: str) -> bytes:
         return read_bytes(game_dir, rel)
     if outer.lower().endswith(".rpa"):
         return Rpa(safe_path(game_dir, outer)).read(inner)
+    if outer.lower().endswith(".xp3"):
+        return Xp3(safe_path(game_dir, outer)).read(inner)
     return Asar(safe_path(game_dir, outer)).read(inner)
 
 

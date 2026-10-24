@@ -41,11 +41,12 @@ class EnginePlugin:
         """Original game title, used for the project fingerprint. `read(rel)` returns original bytes."""
         return ""
 
-    def decode(self, rel: str, raw: bytes) -> tuple[str, dict]:
+    def decode(self, rel: str, raw: bytes, game_dir: Path | None = None) -> tuple[str, dict]:
         """E4: file bytes to the text parse() reads, plus the encoding info W4 checks translations against."""
         return decode(raw, self.default_encoding)
 
-    def outputs(self, texts: dict[str, str], repl: dict[str, dict[str, str]]) -> dict[str, tuple[bytes, int]] | None:
+    def outputs(self, texts: dict[str, str], repl: dict[str, dict[str, str]],
+                game_dir: Path | None = None) -> dict[str, tuple[bytes, int]] | None:
         """W5 for engines that add new files instead of editing the originals: {rel: (bytes, translations)} of
         every file the translation needs (files we created earlier and no longer need are deleted).
         None: render each file."""
