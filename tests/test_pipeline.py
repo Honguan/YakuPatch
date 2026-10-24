@@ -127,6 +127,7 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(translate.resplit('甲乙，丙丁戊己庚辛', ['あいうえ', 'かきくけ']), '甲乙，\n丙丁戊己庚辛')  # nearby comma
         self.assertEqual(translate.resplit('甲<0>乙', ['あ<0>', 'い', 'う']), '甲\n<0>\n乙')         # placeholder intact
         self.assertIsNone(translate.resplit('甲', ['あ', 'い']))
+        self.assertEqual(translate.postprocess('说I　LOVE　you。　好', {}, ('', '')), '说I LOVE you。　好')
 
     def test_validation_failure_and_line_mismatch(self):
         self.small('\\C[2]こんにちは\\C[0]', 'こんばんは')
