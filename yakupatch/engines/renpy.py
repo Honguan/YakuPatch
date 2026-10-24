@@ -274,7 +274,7 @@ class RenPy(EnginePlugin):
                 return m.group(2) if m else source
         return ""
 
-    def decode(self, rel: str, raw: bytes) -> tuple[str, dict]:
+    def decode(self, rel: str, raw: bytes, game_dir: Path | None = None) -> tuple[str, dict]:
         try:
             items = entries(load_rpyc(raw))
         except (pickle.UnpicklingError, zlib.error, EOFError, struct.error, AttributeError, TypeError) as ex:

@@ -55,7 +55,7 @@ def read_game(game_dir: Path, plugin: EnginePlugin) -> tuple[dict, list[tuple[st
     files, segments = {}, []
     for rel in plugin.locate(game_dir):                                   # E3
         raw = vfs.read_original(game_dir, rel, backup)                    # E2
-        text, info = plugin.decode(rel, raw)                              # E4
+        text, info = plugin.decode(rel, raw, game_dir)                              # E4
         files[rel] = {"sha256": sha256(raw), **info}
         try:
             segments += [(rel, s) for s in plugin.parse(rel, text)]      # E5

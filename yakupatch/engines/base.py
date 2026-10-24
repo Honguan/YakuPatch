@@ -41,7 +41,7 @@ class EnginePlugin:
         """Original game title, used for the project fingerprint. `read(rel)` returns original bytes."""
         return ""
 
-    def decode(self, rel: str, raw: bytes) -> tuple[str, dict]:
+    def decode(self, rel: str, raw: bytes, game_dir: Path | None = None) -> tuple[str, dict]:
         """E4: file bytes to the text parse() reads, plus the encoding info W4 checks translations against."""
         return decode(raw, self.default_encoding)
 
