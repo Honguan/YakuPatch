@@ -72,6 +72,7 @@ def validate(src: str, dst: str, masks: dict[str, str], repeat_threshold: int = 
     return errors
 
 
+_WIDE_GAP = re.compile(r"(?<=[A-Za-z0-9])　+(?=[A-Za-z0-9])")
 _BREAK = set("、。，．,.！？!?…‥」』）)】〉》 　")
 _UNIT = re.compile(r"<\d+>|⟦\d+⟧|.", re.S)
 
@@ -105,7 +106,9 @@ def resplit(dst: str, lines: list[str]) -> str | None:
 
 
 def postprocess(dst: str, masks: dict[str, str], pad: tuple[str, str]) -> str:
-    """T12: restore control codes and surrounding whitespace. No Simplified/Traditional conversion."""
+    """T12: restore control codes and surrounding whitespace. No Simplified/Traditional conversion.
+    Models put ideographic spaces between Latin words ("I　LOVE　you"), which shows as wide gaps."""
+    dst = _WIDE_GAP.sub(" ", dst)
     return pad[0] + unmask(dst, masks) + pad[1]
 
 
