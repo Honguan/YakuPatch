@@ -222,7 +222,19 @@ def dispatch(works: list[Work], backend, terms: dict, sleep=time.sleep, cancelle
                 else:
                     sleep(2 ** attempt)
 
-    def solve(group, context=True, hot=False):
+    def rejoin(w):
+        """A message broken mid-sentence often comes back as one line: translate it joined, then break it again."""
+        lines = w.text.split("\n")
+        one = dataclasses.replace(w, text=translate.join_lines(lines), result=None, errors=[])
+        solve([one], context=False, joined=True)
+        w.attempts, w.response = one.attempts, one.response
+        dst = translate.resplit(one.result, lines) if one.result is not None else None
+        w.errors = (one.errors or ["line_count"]) if dst is None else \
+            translate.validate(w.text, dst, w.masks, getattr(backend.config, "repeat_threshold", 4))
+        w.result = dst if not w.errors else None
+        return w
+
+    def solve(group, context=True, hot=False, joined=False):
         if cancelled and cancelled.is_set():
             raise CancelledError
         reason = []
@@ -254,7 +266,10 @@ def dispatch(works: list[Work], backend, terms: dict, sleep=time.sleep, cancelle
         if context:
             return solve(group, context=False)
         if not hot and "too_long" not in reason:
-            return solve(group, context=False, hot=True)
+            return solve(group, context=False, hot=True, joined=joined)
+        w = group[0]
+        if not joined and "\n" in w.text and {"line_count", "newlines"} & set(w.errors):
+            return [rejoin(w)]
         return group
 
     return solve(works)

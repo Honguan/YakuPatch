@@ -43,7 +43,8 @@ ast = {
 \t},
 }
 """.replace("\n", "\r\n")
-TBL = 'tooltip = {\r\n\tlock = "システムメニューを固定します。",\r\n\tid = "lock",\r\n}\r\n'
+TBL = ('tooltip = {\r\n\tlock = "システムメニューを固定します。",\r\n\tid = "lock",\r\n'
+       '\tprohibit_head = "！？ァィゥェォッャュョ",\r\n}\r\n')
 
 
 class PfsFormat(unittest.TestCase):
