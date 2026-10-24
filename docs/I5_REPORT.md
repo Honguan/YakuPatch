@@ -1,0 +1,50 @@
+# I5 交付報告
+
+分支：`feat/i5`（從 `main` ecd62bb 開）。日期：2026-10-24。進行中：目前完成 Godot。
+
+## 遊戲庫盤點（I5 引擎）
+
+以檔案特徵掃描 `D:\Games\TEMP` 與 `G:\game`（深度 4 層）：
+
+| 引擎 | 找到 | 日文且無中文 |
+|---|---:|---|
+| Godot | 5 款（另有 2 個語音／備份資料夾） | 1 款：ぶちこめ☆ハイキック！。職場の30日間、Flirting With Girls 內建中文翻譯；さいみん！已漢化 |
+| Artemis | 6 | 待查（Fuyu Kiss CHS 已是中文） |
+| CatSystem2 | 5 | 待查（人類最強 1–3 CHS 已是中文） |
+| Wolf RPG | 5 | 待查（Brave Alchemist Colette 已漢化） |
+| SRPG Studio | 1 | 待查 |
+
+## 修改檔案
+
+| 檔案 | 內容 |
+|---|---|
+| `yakupatch/engines/godot.py` | Godot：讀寫 `.pck`；提取 `.tscn`／`.tres` 的文字屬性與 Godot 3 `.gdc` 的字串常數；換字型 |
+| `yakupatch/engines/__init__.py` | 註冊 Godot |
+| `tests/test_godot.py` | 新增 3 個測試：pck 格式 1／2 讀寫、`.gdc` 常數解析、提取→寫回→還原 |
+
+## 邏輯摘要（Godot）
+
+- **偵測**：遊戲資料夾內有 `GDPC` 開頭的 `.pck`。資料夾內每個 pck 都處理，因為遊戲可能在執行時載入其他 pck（ぶちこめ 的主程式會載入 `ozisanroom.pck`）。
+- **提取範圍**：
+  - `.tscn`／`.tres`：屬性 `text`、`bbcode_text`、`hint_tooltip`、`placeholder_text`、`dialog_text`、`window_title`、`tooltip_text`，含日文才取。
+  - `.gdc`（Godot 3 位元組碼 12、13 版）：字串常數含日文、不像路徑，而且沒有在任何場景當節點名、動畫名等其他字串出現，也不是識別字。後者可能被程式拿來找節點或比對，翻了會壞。
+- **寫回**：整個 pck 重寫。改過的檔案附加在檔尾，目錄裡的位移、大小、MD5 改指向新資料，其他資料不動；原檔留在備份。
+- **字型**：譯文有中文字時，pck 內所有 `.ttf`／`.otf` 換成 Windows 中文字型（沿用 Unity 的選法：依繁簡與粗細選雅黑、正黑等）。
+- **語言預檢**：pck 內有 `*.zh*.translation` 時回報內建中文。
+
+## 測試結果
+
+- `python -X utf8 -m unittest discover -s tests -t tests`：88 個測試全部通過。
+- **19_godot**（ぶちこめ☆ハイキック！，Godot 3.3，兩個 pck）：
+  - 提取 94 句（去重後），Sakura 翻譯成功 94、失敗 0，耗時 20 秒；寫回 2 個檔案、797 處。
+  - 讀回：兩個 pck 提取到的位置都沒有殘留假名；字型已換成雅黑。
+  - 啟動 8 秒沒有崩潰、沒有錯誤輸出。
+  - 還原後兩個 pck 的 SHA-256 與原版相同；之後重新寫回，留給實機檢查。
+  - **使用者實機檢查：待確認。**
+
+## 新增 shortcut 與已知限制
+
+- **字型全換**：pck 內所有字型都換成中文字型，包括只有英文的字型。沒有檢查字型原本缺哪些字。
+- **`.gdc` 用猜的**：字串常數只要含日文、不像路徑、不和其他名稱重複就翻；被程式拿來比對的字串可能因此失效。和名稱重複的會保留原文，所以程式動態設定的部分按鈕提示可能仍是日文。
+- **不支援**：加密 pck、嵌在 `.exe` 內的 pck、Godot 4 的二進位場景（`.scn`）與位元組碼、Dialogic 時間軸（`.dtl`）、動畫軌道裡的文字、Godot 4 匯入的字型（`.fontdata`）。
+- **記憶體**：pck 整檔讀進記憶體，大小上限 512 MB。

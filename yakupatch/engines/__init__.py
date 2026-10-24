@@ -8,8 +8,9 @@ from .renpy import RenPy
 from .tyrano import Tyrano
 from .kirikiri import KiriKiri
 from .unity import Unity
+from .godot import Godot
 
-PLUGINS: list[EnginePlugin] = [RpgMakerMZ(), RpgMakerMV(), Tyrano(), RenPy(), KiriKiri(), Unity()]
+PLUGINS: list[EnginePlugin] = [RpgMakerMZ(), RpgMakerMV(), Tyrano(), RenPy(), KiriKiri(), Unity(), Godot()]
 MIN_SCORE = 0.9
 
 
