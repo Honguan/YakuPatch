@@ -1,4 +1,5 @@
 """T1–T12 orchestration. Only the main thread writes Store and cache (§6)."""
+import dataclasses
 import hashlib
 import json
 import math
@@ -29,6 +30,29 @@ class Work:
     result: str | None = None
     errors: list[str] = field(default_factory=list)
     attempts: int = 0
+    response: str | None = None        # the backend's last raw answer, logged when the line fails
+
+
+class RunLog:
+    """One JSONL file per translation run in the tool's data folder (never the game): settings, transient errors,
+    every failed line with the backend's raw answer, and the totals. Workers write too, hence the lock."""
+
+    def __init__(self, store: Store, run_id: str):
+        self.path = store.dir.parent.parent / "logs" / f"{store.dir.name}-{run_id}.jsonl"
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.file = open(self.path, "a", encoding="utf-8")
+        self.lock = threading.Lock()
+
+    def __call__(self, event: str, **data) -> None:
+        line = json.dumps({"time": time.strftime("%Y-%m-%d %H:%M:%S"), "event": event, **data}, ensure_ascii=False)
+        with self.lock:
+            if not self.file.closed:          # a cancelled worker may still finish after the run ended
+                self.file.write(line + "\n")
+                self.file.flush()
+
+    def close(self) -> None:
+        with self.lock:
+            self.file.close()
 
 
 def select(store: Store, limit: int | None = None, only=None) -> list[dict]:
@@ -176,7 +200,7 @@ def parse_ids(response: str, works: list[Work]) -> list[str | None]:
     return [found.get(str(i)) for i in range(len(works))]
 
 
-def dispatch(works: list[Work], backend, terms: dict, sleep=time.sleep, cancelled=None) -> list[Work]:
+def dispatch(works: list[Work], backend, terms: dict, sleep=time.sleep, cancelled=None, log=None) -> list[Work]:
     """Workers only return results. A cancelled/incomplete batch never mutates Store."""
     def request(group, context=True, hot=False):
         messages = backend.messages(group, terms, context=context)
@@ -188,7 +212,9 @@ def dispatch(works: list[Work], backend, terms: dict, sleep=time.sleep, cancelle
                     w.attempts += 1
                 return backend.complete(messages, temperature=min(2, max(0.3, getattr(backend.config, "temperature", 0) + 0.2))
                                         if hot else None)
-            except Transient:
+            except Transient as ex:
+                if log:
+                    log("transient", ids=[w.id for w in group], attempt=attempt + 1, error=str(ex))
                 if attempt == backend.config.retries:
                     raise
                 if cancelled and sleep is time.sleep:
@@ -204,6 +230,8 @@ def dispatch(works: list[Work], backend, terms: dict, sleep=time.sleep, cancelle
             if tokens(backend.messages(group, terms, context=context)) > backend.caps.max_input_tokens:
                 raise TooLong("輸入預算不足")
             response = request(group, context, hot)
+            for w in group:
+                w.response = response
             values = (parse(response, group, group[0].context if context else []) if backend.caps.io_format == "lines"
                       else parse_ids(response, group))
             for w, dst in zip(group, values):
@@ -243,7 +271,10 @@ def run(store: Store, codes: list[str], backend, limit=None, progress=None, slee
     rows = select(store, limit, only)
     use_style(store, backend)
     run_id = new_run()
-    stats = {"run": run_id, "total": len(rows), "translated": 0, "failed": 0, "cached": 0, "errors": Counter(),
+    log = RunLog(store, run_id)
+    log("start", project=store.dir.name, backend=backend.by, total=len(rows), limit=limit, fresh=fresh,
+        config=dataclasses.asdict(backend.config) if dataclasses.is_dataclass(backend.config) else None)
+    stats = {"run": run_id, "log": str(log.path), "total": len(rows), "translated": 0, "failed": 0, "cached": 0, "errors": Counter(),
              "stopped": False}
     started = time.monotonic()
 
@@ -258,6 +289,9 @@ def run(store: Store, codes: list[str], backend, limit=None, progress=None, slee
             if ok:
                 fields["dst"] = translate.postprocess(w.result, w.masks, w.pad)
                 cache_rows.append((keys[w.id], w.result))
+            else:
+                log("failed", id=w.id, kind=rec["kind"], file=rec["refs"][0]["file"], locs=rec["refs"][0]["locs"],
+                    src=w.src, sent=w.text, errors=w.errors, attempts=w.attempts, response=w.response)
             stats["translated" if ok else "failed"] += 1
             stats["cached"] += int(cached and ok)
             stats["errors"].update(w.errors)
@@ -270,53 +304,58 @@ def run(store: Store, codes: list[str], backend, limit=None, progress=None, slee
         if progress:
             progress(stats)
 
-    for names in (True, False):
-        update_glossary(store)  # Also recovers seeds if interrupted just after the preceding phase.
-        terms = glossary(store)
-        phase = [r for r in rows if (r["kind"] in ("name", "system")) == names]
-        works = work_list(store, phase, codes, terms)
-        groups = batches(works, backend, terms, store)
-        pool = ThreadPoolExecutor(max_workers=backend.caps.max_parallel)
-        cancelled = threading.Event()
-        try:
-            # Bounded waves avoid queuing the entire game on cancellation.
-            for start in range(0, len(groups), backend.caps.max_parallel):
-                if stop is not None and stop.is_set():
-                    stats["stopped"] = True
-                    break
-                futures, keys = [], {}
-                for group in groups[start:start + backend.caps.max_parallel]:
-                    refreshed = work_list(store, [store.records[w.id] for w in group], codes, terms)
-                    pending = []
-                    for w in refreshed:
-                        keys[w.id] = cache_key(w, backend, terms)
-                        cached = None if fresh else cache_get(store, keys[w.id])
-                        if cached is not None and not translate.validate(w.text, cached, w.masks,
-                                                                         getattr(backend.config, "repeat_threshold", 4)):
-                            w.result = cached
-                            save([w], keys, cached=True)
-                        else:
-                            pending.append(w)
-                    if pending:
-                        futures.append(pool.submit(dispatch, pending, backend, terms, sleep, cancelled))
-                error = None
-                for future in as_completed(futures):
-                    try:
-                        results = future.result()
-                    except Exception as ex:
-                        cancelled.set()
-                        error = error or ex
-                        continue
-                    save(results, keys)
-                if error:
-                    raise error
-        finally:
-            cancelled.set()
-            # shortcut: urllib cannot cancel an in-flight socket, process exit can wait up to --timeout after Ctrl+C.
-            pool.shutdown(wait=False, cancel_futures=True)
-        if stats["stopped"]:
-            break
-    stats["inconsistent"] = qa.check(store, {s: d for s, (d, _) in glossary(store).items()}, f"qa-{run_id}")   # T13
-    stats["seconds"] = round(time.monotonic() - started, 3)
-    stats["errors"] = dict(stats["errors"])
+    try:
+        for names in (True, False):
+            update_glossary(store)  # Also recovers seeds if interrupted just after the preceding phase.
+            terms = glossary(store)
+            phase = [r for r in rows if (r["kind"] in ("name", "system")) == names]
+            works = work_list(store, phase, codes, terms)
+            groups = batches(works, backend, terms, store)
+            pool = ThreadPoolExecutor(max_workers=backend.caps.max_parallel)
+            cancelled = threading.Event()
+            try:
+                # Bounded waves avoid queuing the entire game on cancellation.
+                for start in range(0, len(groups), backend.caps.max_parallel):
+                    if stop is not None and stop.is_set():
+                        stats["stopped"] = True
+                        break
+                    futures, keys = [], {}
+                    for group in groups[start:start + backend.caps.max_parallel]:
+                        refreshed = work_list(store, [store.records[w.id] for w in group], codes, terms)
+                        pending = []
+                        for w in refreshed:
+                            keys[w.id] = cache_key(w, backend, terms)
+                            cached = None if fresh else cache_get(store, keys[w.id])
+                            if cached is not None and not translate.validate(w.text, cached, w.masks,
+                                                                             getattr(backend.config, "repeat_threshold", 4)):
+                                w.result = cached
+                                save([w], keys, cached=True)
+                            else:
+                                pending.append(w)
+                        if pending:
+                            futures.append(pool.submit(dispatch, pending, backend, terms, sleep, cancelled, log))
+                    error = None
+                    for future in as_completed(futures):
+                        try:
+                            results = future.result()
+                        except Exception as ex:
+                            cancelled.set()
+                            error = error or ex
+                            continue
+                        save(results, keys)
+                    if error:
+                        log("error", error=f"{type(error).__name__}: {error}")
+                        raise error
+            finally:
+                cancelled.set()
+                # shortcut: urllib cannot cancel an in-flight socket, process exit can wait up to --timeout after Ctrl+C.
+                pool.shutdown(wait=False, cancel_futures=True)
+            if stats["stopped"]:
+                break
+        stats["inconsistent"] = qa.check(store, {s: d for s, (d, _) in glossary(store).items()}, f"qa-{run_id}")   # T13
+        stats["seconds"] = round(time.monotonic() - started, 3)
+        stats["errors"] = dict(stats["errors"])
+        log("end", **{k: v for k, v in stats.items() if k not in ("log", "run")})
+    finally:
+        log.close()
     return stats
