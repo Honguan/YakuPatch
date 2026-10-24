@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import pickle
+import re
 import struct
 import zlib
 from pathlib import Path
@@ -235,6 +236,71 @@ class Xp3:
             b"\x01" + struct.pack("<QQ", len(packed), len(index)) + packed
 
 
+class Pfs:
+    """Artemis archive (read; write() builds a new one): "pf6" / "pf8", u32 index size, then the index: u32 count,
+    entries [u32 name length][name, "\\" separated][u32 0][u32 offset][u32 size], u32 count + 1, that many u64
+    positions of each entry's offset field (counted from the end of the first u32) and a final 0, u32 position
+    of that table (counted from the index start). pf8 XORs
+    every file's bytes with the SHA-1 of the index."""
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        self.files: dict[str, tuple[int, int]] = {}
+        with open(self.path, "rb") as f:
+            self.magic = f.read(3)
+            if self.magic not in (b"pf6", b"pf8"):
+                raise ValueError("不支援的 pfs 封包版本")
+            size, = struct.unpack("<I", f.read(4))
+            if size > MAX_FILE_BYTES:
+                raise ValueError("pfs 索引過大")
+            index = f.read(size)
+        self.key = hashlib.sha1(index).digest() if self.magic == b"pf8" else None
+        count, = struct.unpack_from("<I", index, 0)
+        p = 4
+        for _ in range(count):
+            n, = struct.unpack_from("<I", index, p)
+            name = index[p + 4:p + 4 + n].decode("utf-8")
+            offset, length = struct.unpack_from("<II", index, p + 8 + n)
+            self.files[_inner_ok(name.replace("\\", "/"))] = (offset, length)
+            p += 16 + n
+
+    def read(self, inner: str) -> bytes:
+        offset, length = self.files[inner]
+        if length > MAX_FILE_BYTES:
+            raise UnsafePath(f"檔案超過大小上限：{inner}")
+        with open(self.path, "rb") as f:
+            f.seek(offset)
+            data = f.read(length)
+        if len(data) != length:
+            raise ValueError(f"pfs 內容不完整：{inner}")
+        return _xor(data, self.key) if self.key else data
+
+    @staticmethod
+    def write(files: dict[str, bytes], magic: bytes = b"pf8") -> bytes:
+        names = [n.replace("/", "\\").encode("utf-8") for n in files]
+        size = 4 + sum(16 + len(n) for n in names) + 4 + 8 * (len(names) + 1) + 4
+        index, fields, offset = bytearray(struct.pack("<I", len(names))), [], 7 + size
+        for n, data in zip(names, files.values()):
+            index += struct.pack("<I", len(n)) + n + struct.pack("<I", 0)
+            fields.append(len(index) - 4)
+            index += struct.pack("<II", offset, len(data))
+            offset += len(data)
+        table = len(index)
+        index += struct.pack(f"<I{len(fields) + 1}Q", len(fields) + 1, *fields, 0) + struct.pack("<I", table)
+        key = hashlib.sha1(index).digest() if magic == b"pf8" else None
+        body = b"".join(_xor(d, key) if key else d for d in files.values())
+        return magic + struct.pack("<I", len(index)) + bytes(index) + body
+
+
+def _xor(data: bytes, key: bytes) -> bytes:
+    n = len(data)
+    return (int.from_bytes(data, "little") ^ int.from_bytes((key * (n // len(key) + 1))[:n], "little")).to_bytes(n, "little")
+
+
+def is_pfs(name: str) -> bool:
+    return re.search(r"\.pfs(\.\d+)?$", name, re.I) is not None
+
+
 def _chunks(data: bytes):
     i = 0
     while i + 12 <= len(data):
@@ -254,6 +320,8 @@ def open_container(game_dir: Path, outer: str, backup: Backup | None = None):
         return Rpa(path)
     if outer.lower().endswith(".xp3"):
         return Xp3(path)
+    if is_pfs(outer):
+        return Pfs(path)
     if not outer.lower().endswith(".asar"):
         raise ValueError(f"不支援的封包格式：{outer}")
     head = (backup or Backup(game_dir)).original_head(outer)
@@ -277,6 +345,8 @@ def read_current(game_dir: Path, rel: str) -> bytes:
         return Rpa(safe_path(game_dir, outer)).read(inner)
     if outer.lower().endswith(".xp3"):
         return Xp3(safe_path(game_dir, outer)).read(inner)
+    if is_pfs(outer):
+        return Pfs(safe_path(game_dir, outer)).read(inner)
     return Asar(safe_path(game_dir, outer)).read(inner)
 
 
