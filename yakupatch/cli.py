@@ -191,6 +191,7 @@ def _run(args) -> int:
         print(f"翻譯紀錄 {result['run']}：成功 {result['translated']}、失敗 {result['failed']}，耗時 {result['seconds']} 秒")
         for reason, n in result["errors"].items():
             print(f"  {_REASON.get(reason, reason)}：{n}")
+        print(f"翻譯紀錄檔：{result['log']}")
         return 1 if result["failed"] else 0
     elif args.cmd == "export":
         paths = exchange.export_batches(store, plugin.control_codes)

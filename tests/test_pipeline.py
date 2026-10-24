@@ -1,5 +1,6 @@
 import io
 import json
+from pathlib import Path
 import shutil
 import sqlite3
 import unittest
@@ -94,6 +95,9 @@ class Pipeline(unittest.TestCase):
         result = pipeline.run(self.store, self.codes, backend, sleep=waits.append)
         self.assertEqual((result['translated'], result['failed']), (2, 0))
         self.assertEqual(waits, [1])
+        events = [json.loads(line) for line in Path(result['log']).read_text('utf-8').splitlines()]
+        self.assertIn({'event': 'transient', 'attempt': 1, 'error': 'timeout'},
+                      [{k: e[k] for k in ('event', 'attempt', 'error') if k in e} for e in events])
         self.assertTrue(any(temp is not None for _, temp in backend.calls))
 
     def test_interrupt_preserves_completed_batches(self):
@@ -118,6 +122,11 @@ class Pipeline(unittest.TestCase):
         self.assertIn('placeholders', failed['errors'])
         self.assertEqual(failed['status'], 'failed')
         self.assertIn('failed', failed['flags'])
+        log = [json.loads(line) for line in Path(result['log']).read_text('utf-8').splitlines()]
+        self.assertEqual(Path(result['log']).parent, self.store.dir.parent.parent / 'logs')     # tool data, not the game
+        self.assertEqual([e['event'] for e in log], ['start', 'failed', 'end'])
+        self.assertEqual((log[1]['id'], log[1]['response'], log[1]['src']), ('0', '你好', '\\C[2]こんにちは\\C[0]'))
+        self.assertEqual(log[2]['failed'], 1)
 
     def test_fatal_errors_leave_pending_and_refusal_is_not_resent(self):
         self.small('こんにちは')
