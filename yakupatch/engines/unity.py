@@ -1,8 +1,10 @@
 """Unity (Mono / IL2CPP): text inside *_Data serialized files, read and written through UnityPy (§10).
 A logical file is one serialized file; its decoded text is a JSON list of the strings our rules pick:
-UI components, Utage books and settings, Utage localization tables, Naninovel script bundles. Files are rewritten
+UI components, Utage books and settings, Utage localization tables, Naninovel script bundles, sentences in other
+MonoBehaviours and in the Mono game assemblies (Assembly-CSharp*.dll, see clr.py). Files are rewritten
 whole (outputs()), the originals stay in the backup; the Addressables catalog loses the CRCs of the bundles. Text is shown in one Windows
-CJK font: the default font's dynamic fallback renders it at run time and the game's CJK fonts give up their characters.
+CJK font: the default font's dynamic fallback renders it at run time and the game's CJK fonts give up their letters,
+kana and ideographs (symbols stay). Fonts embedded for the legacy UI Text get the Windows font's data the same way.
 Games without such a fallback get their other CJK fonts in the same file as fallbacks instead."""
 import json
 import os
@@ -10,6 +12,7 @@ import re
 import struct
 from pathlib import Path
 
+from .. import clr
 from ..backup import Backup
 from .base import EnginePlugin, Segment
 
@@ -25,6 +28,13 @@ _CATALOG = "StreamingAssets/aa/catalog.json"
 # Naninovel commands: field -> kind. PrintText.AuthorId is a free-form name unless it is a configured character ID.
 _SERIF = re.compile(r"mincho|serif|ming|song|antique|kaisei|明朝", re.I)
 _BOLD = re.compile(r"bold|black|heavy|[-_ ]b$|w[7-9]", re.I)
+# Other classes: fields (list items count as one field) holding a string that reads as a sentence; names and keys
+# are short and unpunctuated.
+_SENTENCE = re.compile(r"[、。，！？!?…「」『』（）]")
+_NOT_TEXT = re.compile(r"^(Cubism|TMP_)")                 # Live2D parameter / part names, font assets
+_PATH = re.compile(r"[/\\]|\.\w{2,4}$")                 # resource paths and file names in code
+# Characters handed to the one CJK font; symbols stay in the game's fonts, which often draw their own (┻ as a heart).
+_UNIFIED = re.compile(r"[\u0020-\u007e\u3000-\u30ff\u4e00-\u9fff\uff00-\uffef]")
 _NANI_TEXT = {"PrintText": {"Text": "dialogue", "AuthorId": "name"}, "AddChoice": {"ChoiceSummary": "choice"}}
 
 
@@ -93,6 +103,21 @@ def _files(game_dir: Path) -> list[Path]:
     data = _data_dir(game_dir)
     return sorted(p for p in data.iterdir() if p.is_file() and p.suffix.lower() not in _SKIP_SUFFIX
                   and (p.suffix.lower() == ".assets" or p.name.startswith("level") or p.name == "globalgamemanagers"))
+
+
+def _assemblies(game_dir: Path) -> list[Path]:
+    return sorted((_data_dir(game_dir) / "Managed").glob("Assembly-CSharp*.dll"))
+
+
+def _dll_entries(raw: bytes) -> list[dict]:
+    """Sentences loaded with ldstr; short words and paths are often keys the code compares or loads by."""
+    try:
+        asm = clr.Assembly(raw)
+    except (clr.ClrError, struct.error, IndexError):
+        return []                           # unreadable or signed assemblies are left alone
+    used = {off for _, off in asm.ldstr}
+    return [{"loc": f"US:{off}", "kind": "dialogue", "text": s} for off, s in asm.strings.items()
+            if off in used and _JA.search(s) and (_SENTENCE.search(s) or len(s) >= 6) and not _PATH.search(s)]
 
 
 def _bundles(game_dir: Path) -> list[Path]:
@@ -173,7 +198,24 @@ def _entries(cls: str, tree: dict, pid: int) -> list[dict]:
                     if kind == "dialogue" and author:
                         e["speaker"] = author
                     out.append(e)
+    elif cls and cls not in _UI and not _NOT_TEXT.match(cls):
+        found = [(p, s, re.sub(r"/\d+", "/#", p)) for p, s in _strings(tree) if _JA.search(s)]
+        text = {f for _, s, f in found if _SENTENCE.search(s) or len(s) >= 6}
+        out += [{"loc": f"{pid}:{p}", "kind": "dialogue", "text": s} for p, s, f in found if f in text]
     return out
+
+
+def _strings(node, path: str = ""):
+    """(JSON pointer, value) of every string in a tree except the object's own name."""
+    if isinstance(node, str):
+        yield path, node
+    elif isinstance(node, dict):
+        for k, v in node.items():
+            if path or k != "m_Name":
+                yield from _strings(v, f"{path}/{k}")
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            yield from _strings(v, f"{path}/{i}")
 
 
 def _table_entries(text: str, pid: int) -> list[dict]:
@@ -235,7 +277,7 @@ class Unity(EnginePlugin):
         ctx = _context(game_dir)
         backup = Backup(game_dir)
         found = []
-        for p in _files(game_dir) + _bundles(game_dir):
+        for p in _files(game_dir) + _bundles(game_dir) + _assemblies(game_dir):
             rel = p.relative_to(game_dir).as_posix()
             if json.loads(self.decode(rel, backup.original_bytes(rel), game_dir)[0]):
                 found.append(rel)
@@ -252,6 +294,9 @@ class Unity(EnginePlugin):
             return ""
 
     def decode(self, rel: str, raw: bytes, game_dir: Path | None = None) -> tuple[str, dict]:
+        info = {"encoding": "utf-8", "bom": False, "newline": "\n"}
+        if rel.endswith(".dll"):
+            return json.dumps(_dll_entries(raw), ensure_ascii=False), info
         ctx = _context(game_dir)
         _, sf = _load(rel, raw)
         out = []
@@ -267,7 +312,7 @@ class Unity(EnginePlugin):
                     out += _entries(cls, tree, pid)
             except (ValueError, KeyError, EOFError, IndexError, struct.error, UnicodeDecodeError):
                 continue                    # objects our rules cannot read are left alone
-        return json.dumps(out, ensure_ascii=False), {"encoding": "utf-8", "bom": False, "newline": "\n"}
+        return json.dumps(out, ensure_ascii=False), info
 
     def parse(self, rel: str, text: str) -> list[Segment]:
         return [Segment(e["loc"], e["kind"], e["text"], e.get("speaker")) for e in json.loads(text)]
@@ -276,6 +321,8 @@ class Unity(EnginePlugin):
         raise NotImplementedError("Unity 以 outputs() 重寫整個資產檔")
 
     def _apply(self, game_dir: Path, rel: str, raw: bytes, repl: dict[str, str]) -> bytes:
+        if rel.endswith(".dll"):
+            return clr.Assembly(raw).save({int(loc[3:]): value for loc, value in repl.items()})
         ctx = _context(game_dir)
         root, sf = _load(rel, raw)
         by_obj: dict[int, dict[str, str]] = {}
@@ -307,7 +354,7 @@ class Unity(EnginePlugin):
         ctx = _context(game_dir)
         out = {}
         for rel, raw in sources.items():
-            if rel.endswith(".bundle"):
+            if rel.endswith((".bundle", ".dll")):
                 continue
             _, sf = _load(rel, raw)
             fonts = {}
@@ -398,7 +445,8 @@ class Unity(EnginePlugin):
             for pid, _ in cjk.get(rel, []):
                 obj = sf.objects[pid]
                 _, tree, nodes = ctx.tree(obj)
-                tree["m_CharacterTable"] = []
+                tree["m_CharacterTable"] = [c for c in tree.get("m_CharacterTable") or []
+                                            if not _UNIFIED.match(chr(min(c.get("m_Unicode", 0), 0x10FFFF)))]
                 obj.save_typetree(tree, nodes) if nodes is not None else obj.save_typetree(tree)
             if rel == frel:
                 for pid, src in targets:
@@ -424,6 +472,44 @@ class Unity(EnginePlugin):
             out[rel] = _save(root, sf)
         return out
 
+    def _legacy(self, game_dir: Path, get, need: set[str]) -> dict[str, bytes]:
+        """Replace the data of embedded Unity fonts (legacy UI Text) with a Windows CJK font in the same style; fonts a
+        TMP asset renders from are left to _dynamic(). Returns every file involved, unchanged when nothing is needed."""
+        ctx = _context(game_dir)
+        out = {}
+        for path in _files(game_dir):
+            rel = path.relative_to(game_dir).as_posix()
+            root, sf = _load(rel, get(rel))
+            fonts, sources = [], set()
+            for pid, obj in sf.objects.items():
+                if obj.type.name == "Font":
+                    fonts.append(pid)
+                elif obj.type.name == "MonoBehaviour":
+                    try:
+                        src = ctx.tree(obj)[1].get("m_SourceFontFile") or {}
+                    except (ValueError, KeyError, EOFError, IndexError, struct.error):
+                        continue
+                    if src.get("m_FileID") == 0:
+                        sources.add(src.get("m_PathID"))
+            targets = []
+            for pid in fonts:
+                if pid not in sources:
+                    tree = sf.objects[pid].read_typetree()
+                    if tree.get("m_FontData"):
+                        targets.append((pid, tree))
+            if not targets:
+                continue
+            out[rel] = get(rel)
+            if not need:
+                continue
+            for pid, tree in targets:
+                font = _system_font(need, [tree.get("m_Name", "")])
+                if font is not None:
+                    tree["m_FontData"] = list(font)
+                    sf.objects[pid].save_typetree(tree)
+            out[rel] = _save(root, sf)
+        return out
+
     def outputs(self, texts: dict[str, str], repl: dict[str, dict[str, str]],
                 game_dir: Path | None = None) -> dict[str, tuple[bytes, int]]:
         backup = Backup(game_dir)
@@ -439,6 +525,8 @@ class Unity(EnginePlugin):
         if need and not fonts:
             for rel, data in self._fonts(game_dir, {rel: data for rel, (data, _) in result.items()}, need).items():
                 result[rel] = (data, result[rel][1])
+        for rel, data in self._legacy(game_dir, get, need).items():
+            result[rel] = (data, result.get(rel, (b"", 0))[1])
         catalog = f"{_data_dir(game_dir).relative_to(game_dir).as_posix()}/{_CATALOG}"
         if any(rel.endswith(".bundle") for rel in result) and (game_dir / catalog).is_file():
             raw = backup.original_bytes(catalog)

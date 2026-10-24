@@ -3,7 +3,12 @@ import unittest
 import base64
 import json
 
-from yakupatch.engines.unity import _catalog, _entries, _set, _table_entries
+from pathlib import Path
+
+from yakupatch.clr import Assembly
+from yakupatch.engines.unity import _catalog, _dll_entries, _entries, _set, _table_entries
+
+LINES = (Path(__file__).parent / "fixtures" / "clr" / "Lines.dll").read_bytes()    # source: Lines.cs
 
 
 def sheet(*rows):
@@ -37,6 +42,12 @@ class UtageRules(unittest.TestCase):
                          [{"loc": "3:/m_text", "kind": "ui", "text": "セーブ"}])
         self.assertEqual(_entries("Text", {"m_Text": "Save"}, 3), [])
         self.assertEqual(_entries("CharacterData", {"name": "ヒカリコ"}, 3), [])     # keys may be Japanese: no rule
+        data = {"m_Name": "メッセージデータ一覧", "id": "あいさつ",
+                "List": [{"Messages": ["よ、よろしくお願いします…", "うう～"]}, {"Messages": ["こんにちは"]}]}
+        self.assertEqual([(e["loc"], e["text"]) for e in _entries("MessageData", data, 4)],
+                         [("4:/List/0/Messages/0", "よ、よろしくお願いします…"), ("4:/List/0/Messages/1", "うう～"),
+                          ("4:/List/1/Messages/0", "こんにちは")])
+        self.assertEqual(_entries("CubismDisplayInfoParameterName", {"Name": "左胸の揺れ、Y方向のパラメータ"}, 4), [])
 
     def test_localization_table_and_set(self):
         text = "﻿Key\tJapanese\tEnglish\r\nYes\tはい\tYes\r\nOk\tOK\tOK\r\n"
@@ -65,6 +76,30 @@ class UtageRules(unittest.TestCase):
         out = base64.b64decode(json.loads(_catalog(raw))["m_ExtraDataString"])
         self.assertEqual(len(out), len(extra))
         self.assertEqual(json.loads(out[2:].decode("utf-16-le")), {"m_Hash": "ab", "m_Crc": 0, "m_Timeout": 0})
+
+
+class MonoStrings(unittest.TestCase):
+    def test_reads_ldstr_strings(self):
+        asm = Assembly(LINES)
+        self.assertEqual(sorted({asm.strings[off] for _, off in asm.ldstr}),
+                         sorted(["よ、よろしくお願いします…", "初めてなのに、こんなの嫌ぁ…っ", "ここが検査室…",
+                                 "Resources/立ち絵/girl", "ok", "", "教頭に怒られてしまった…", "おまんこ"]))
+
+    def test_sentences_only(self):
+        self.assertEqual(sorted(e["text"] for e in _dll_entries(LINES)),
+                         sorted(["よ、よろしくお願いします…", "初めてなのに、こんなの嫌ぁ…っ", "ここが検査室…",
+                                 "教頭に怒られてしまった…"]))
+        self.assertEqual(_dll_entries(b"MZ not a dll"), [])
+
+    def test_rewrite_moves_every_ldstr(self):
+        asm = Assembly(LINES)
+        first = {s: off for off, s in asm.strings.items()}
+        longer = "请多指教……这是比原文更长的一句译文，用来测试字串区变长的情况"
+        out = Assembly(asm.save({first["よ、よろしくお願いします…"]: longer, first["おまんこ"]: "短"}))
+        self.assertEqual([out.strings[off] for _, off in out.ldstr],
+                         [longer if s == "よ、よろしくお願いします…" else "短" if s == "おまんこ" else s
+                          for s in (asm.strings[off] for _, off in asm.ldstr)])
+        self.assertEqual(Assembly(out.save({})).strings, out.strings)       # an already patched file reads back
 
 
 if __name__ == "__main__":
