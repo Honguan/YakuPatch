@@ -2,10 +2,10 @@
 
 YakuPatch 把日文遊戲翻譯成中文。它直接修改遊戲的文字檔，不注入程式，寫入前會先備份，可以隨時還原。
 
-目前支援 RPG Maker MV／MZ、TyranoScript（含 `app.asar`）與 Ren'Py（含 `.rpa`），翻譯後端有 Sakura（本地模型）與 Codex（實驗性）。
+目前支援 RPG Maker MV／MZ、TyranoScript（含 `app.asar`）、Ren'Py（含 `.rpa`）、KiriKiri（未加密 `.xp3`）與 Unity（Mono；UI、Utage、Naninovel），翻譯後端有 Sakura（本地模型）與 Codex（實驗性）。
 
 > [!NOTE]
-> 專案仍在開發中。I1（MV/MZ、Sakura、命令列）與 I2（圖形介面、Codex）已完成；I3（全文 QA、外部字典、自動換行、Tyrano、Ren'Py）已完成。設計見 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
+> 專案仍在開發中。I1（MV/MZ、Sakura、命令列）與 I2（圖形介面、Codex）已完成；I3（全文 QA、外部字典、自動換行、Tyrano、Ren'Py）已完成；I4（KiriKiri、Unity）進行中。設計見 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
 
 ## 功能
 
@@ -15,6 +15,7 @@ YakuPatch 把日文遊戲翻譯成中文。它直接修改遊戲的文字檔，�
 - 翻譯後做全文 QA：標出術語缺譯、同句異譯與夾在中間的漏譯；可寫 `style.md` 指定 Codex 的翻譯風格。
 - 術語候選可查外部字典（JMnedict、日本人名、VNDB、Wikidata、自備詞庫），字典譯名須人工確認才會生效。
 - Tyrano 的 `app.asar` 只改檔頭，改過的劇本放在 `app.asar.unpacked/`；Ren'Py 不改原腳本，譯文寫成新語言 `game/tl/yakupatch/`。
+- KiriKiri 不改原封包，譯文打包成新的 `patch.xp3`；Unity 整檔重寫資產檔，並把文字統一改用 Windows 內建的中文字型，避免方塊字。
 - 寫回前先預覽，備份後才修改；`restore` 還原，`undo` 撤銷某一次翻譯或匯入。
 - 可以匯出分批檔，交給其他工具或人工翻譯後再匯入。
 
@@ -164,7 +165,7 @@ python -X utf8 scripts/eval_backend.py --backend codex --output "$env:TEMP/eval-
 - 報告不能寫進受測的遊戲庫。測試副本保留在報告記載的暫存路徑，方便人工複查。
 - 這些腳本不啟動遊戲，也不檢查畫面或字型。
 
-實測數字與失敗清單見 [I1 報告](docs/I1_REPORT.md)、[I2 報告](docs/I2_REPORT.md) 與 [I3 報告](docs/I3_REPORT.md)。
+實測數字與失敗清單見 [I1 報告](docs/I1_REPORT.md)、[I2 報告](docs/I2_REPORT.md)、[I3 報告](docs/I3_REPORT.md) 與 [I4 報告](docs/I4_REPORT.md)。
 
 ## 授權
 
