@@ -14,6 +14,12 @@ from .tyrano import Tyrano
 _PATCH = re.compile(r"^patch(\d*)\.xp3$", re.I)
 _SPEAKER = re.compile(r"^【\s*([^【】\[\]]+?)\s*】\s*(?:\[[^\[\]]*\]\s*)*$")      # 【 美優 】[r]
 _NAME_LOC = re.compile(r"^L(\d+)【$")
+# TJS strings the player sees in standard KAG3 system scripts; others hold font names, kinsoku tables or debug text.
+_TJS = re.compile(r'(new\s+KAGMenuItem\s*\(\s*this\s*,\s*|\bcaption\s*=\s*|askYesNo\s*\(\s*|System\.title\s*=\s*)'
+                  r'"((?:[^"\\\n]|\\.)*)"')
+_TJS_LOC = re.compile(r"^L(\d+):(\d+)$")
+_TJS_BODY = re.compile(r'(?:[^"\\\n]|\\.)*')
+_JA = re.compile(r"[぀-ヿ一-鿿]")
 
 
 def _number(name: str) -> int:
@@ -25,6 +31,7 @@ class KiriKiri(Tyrano):
     name = "kirikiri"
     version = "1.0.0"
     default_encoding = "cp932"
+    control_codes = Tyrano.control_codes + [r"\(&[A-Za-z0-9]\)", r"\\[tn]"]       # menu accelerators, TJS escapes
 
     def detect(self, game_dir: Path) -> float:
         try:
@@ -52,7 +59,7 @@ class KiriKiri(Tyrano):
         clash: set[str] = set()
         for name, k in self._archives(game_dir):
             for inner in vfs.Xp3(game_dir / name).files:
-                if not inner.lower().endswith(".ks"):
+                if not inner.lower().endswith((".ks", ".tjs")):
                     continue
                 key = inner.rsplit("/", 1)[-1].lower()
                 if k == 0 and key in found:
@@ -92,6 +99,10 @@ class KiriKiri(Tyrano):
 
     def parse(self, rel: str, text: str) -> list[Segment]:
         lines = text.split("\n")
+        if rel.lower().endswith(".tjs"):
+            return [Segment(f"L{i}:{m.start(2)}", "system" if m.group(1).startswith("askYesNo") else "ui", m.group(2))
+                    for i, line in enumerate(lines) if not line.lstrip().startswith("//")
+                    for m in _TJS.finditer(line) if _JA.search(m.group(2))]
         out, speakers = [], {}
         for seg in super().parse(rel, text):
             line = lines[int(seg.loc[1:])].strip() if re.fullmatch(r"L\d+", seg.loc) else ""
@@ -109,6 +120,13 @@ class KiriKiri(Tyrano):
 
     def render(self, rel: str, text: str, repl: dict[str, str]) -> str:
         lines = text.split("\n")
+        if rel.lower().endswith(".tjs"):
+            for loc, value in sorted(repl.items(), key=lambda kv: -int(_TJS_LOC.match(kv[0]).group(2))):
+                i, col = map(int, _TJS_LOC.match(loc).groups())
+                end = _TJS_BODY.match(lines[i], col).end()
+                value = re.sub(r'(?<!\\)"', r'\\"', value.replace("\r", "").replace("\n", "\\n"))
+                lines[i] = lines[i][:col] + value + lines[i][end:]
+            return "\n".join(lines)
         rest = {}
         for loc, value in repl.items():
             m = _NAME_LOC.match(loc)

@@ -67,6 +67,19 @@ class KiriKiriParse(unittest.TestCase):
         self.assertIn('text="……早安"', out)
 
 
+    def test_tjs_whitelisted_strings_only(self):
+        k = KiriKiri()
+        tjs = ('\tmenu.add(this.m = new KAGMenuItem(this, "システム(&S)", 0, "", false));\r\n'
+               '// x.caption = "コメント";\r\n\tsuper.onCloseQuery(askYesNo("終了しますか？"));\r\n'
+               '\tfont.face = "ＭＳ Ｐ明朝";\r\n')
+        segs = k.parse("data.xp3!system/Menus.tjs", tjs)
+        self.assertEqual([(s.kind, s.text) for s in segs], [("ui", "システム(&S)"), ("system", "終了しますか？")])
+        self.assertEqual(k.render("a.tjs", tjs, {s.loc: s.text for s in segs}), tjs)
+        out = k.render("a.tjs", tjs, {segs[0].loc: "系統(&S)", segs[1].loc: '要"結束"嗎？\n'})
+        self.assertIn('KAGMenuItem(this, "系統(&S)", 0', out)
+        self.assertIn('askYesNo("要\\"結束\\"嗎？\\n")', out)            # stays one valid TJS string literal
+
+
 class KiriKiriPatch(unittest.TestCase):
     def setUp(self):
         tmp = Path(tempfile.mkdtemp(prefix="yakupatch-test-"))
@@ -86,7 +99,7 @@ class KiriKiriPatch(unittest.TestCase):
         self.assertIsInstance(self.plugin, KiriKiri)
         self.assertEqual(self.plugin.title(self.game, lambda r: vfs.read_current(self.game, r)), "テスト")
         # first.ks exists twice in data.xp3; one flat patch file would replace both, so neither is touched.
-        self.assertEqual(sorted(self.store.manifest["files"]), ["patch.xp3!other.ks"])
+        self.assertEqual(sorted(self.store.manifest["files"]), ["data.xp3!system/Config.tjs", "patch.xp3!other.ks"])
         before = snapshot(self.game)
         self.store.update_many("t", [(r["id"], {"dst": "譯" + r["src"], "status": "translated"})
                                      for r in self.store.records.values() if r["status"] == "pending"])
@@ -94,7 +107,7 @@ class KiriKiriPatch(unittest.TestCase):
         self.assertEqual((self.game / "patch.xp3").read_bytes(), before["patch.xp3"])     # originals untouched
         p2 = vfs.Xp3(self.game / "patch2.xp3")
         self.assertEqual(p2.read("other.ks").decode("utf-16"), "*a\n譯修正版。[np]\n")
-        self.assertEqual(self.plugin.locate(self.game), ["patch.xp3!other.ks"])       # our patch is not a source
+        self.assertEqual(self.plugin.locate(self.game), ["data.xp3!system/Config.tjs", "patch.xp3!other.ks"])  # ours is not a source
         core.restore(self.game)
         after = snapshot(self.game)
         self.assertEqual({k: v for k, v in after.items() if not k.startswith("_yakupatch")}, before)
