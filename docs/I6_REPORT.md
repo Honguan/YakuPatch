@@ -47,8 +47,18 @@
 
 ## 未完成與已知限制
 
-- **乾淨電腦驗收未做**：驗收標準要求「未安裝 Python 的乾淨 Windows 10／11」。本機有系統 Python，只用清空 PATH 與環境變數模擬；Visual C++ 可轉散發套件本機已安裝，缺少時的錯誤訊息沒有實測。需要在乾淨電腦或 Windows 沙箱上實機檢查。
-- **GitHub Actions 未執行**：工作流程要推送 tag 才會跑，尚未驗證。測試裡 Godot／Wolf 的字型替換需要 Windows 中文字型；GitHub 的 Windows 映像若沒有雅黑／正黑，這些測試會失敗並擋下發佈。
+- **乾淨電腦驗收未做**：驗收標準要求「未安裝 Python 的乾淨 Windows 10／11」。本機有系統 Python，只用清空 PATH 與環境變數模擬；Visual C++ 可轉散發套件本機已安裝，缺少時的錯誤訊息沒有實測。經使用者決定，改在 README 寫明環境需求。
+- **GitHub Actions**：已執行並通過（手動 run 40167853367、tag run 40169681996），windows-latest 上全部測試含 Godot／Wolf 字型替換都通過。
 - **安裝腳本的網址**：`irm https://raw.githubusercontent.com/.../main/scripts/install.ps1` 要等合併到 `main` 才有效；下載的程式碼是 `main` 分支，不是指定版本。
 - **選用套件**：§12.1 的「選用功能第一次用到時才提示安裝」沒有實作，目前沒有選用套件，全部依賴都在鎖定清單內。
 - **鎖定清單只適用 Windows**：其他平台從原始碼執行時請用 `pip install -e .`。
+
+## 發佈（2026-10-25）
+
+- PR #8 合併後，推送 tag `v1.0.0`，Actions 建立 [GitHub Release](https://github.com/Honguan/YakuPatch/releases/tag/v1.0.0)，附 `YakuPatch_win.zip`（126,447,878 bytes）。
+- 驗收時發現並修正（PR #9）：
+  - **安裝腳本裝出的啟動器閃退**：repo 以 LF 存 `.bat`，GitHub 的 main.zip 也是 LF，cmd 解析 LF＋UTF-8 中文的批次檔會出錯。`.gitattributes` 加上 `*.bat text eol=crlf`，下載 main.zip 確認為 CRLF。
+  - **啟動沒有進度**：`launch_win.bat` 每秒印一個點，直到 GUI 在主視窗出現後寫出就緒檔；視窗出現前出錯會顯示錯誤並暫停，等候超過 120 秒顯示逾時。
+  - **閃退沒有記錄**：`pythonw` 沒有主控台，GUI 的錯誤與原生崩潰堆疊改寫到 `~/.yakupatch/logs/gui.log`。一次「測試連線」閃退（0xc0000409）事後無法重現。
+- 更新檢查：以 0.9.0 查詢回報 v1.0.0，以 1.0.0 查詢不提示。
+- README 改為中英雙語，開頭列出環境需求。報告中的遊戲名稱與路徑已移除。
