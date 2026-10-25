@@ -1,4 +1,5 @@
 """PySide6 GUI (PROJECT_PLAN §11). It only calls yakupatch.core and listens to Store change events."""
+import faulthandler
 import os
 import sys
 import traceback
@@ -8,6 +9,12 @@ from pathlib import Path
 def main() -> int:
     # launch_win.bat shows progress until this file appears: empty once the window is up, else the startup error.
     ready = os.environ.pop("YAKUPATCH_READY", None)
+    if sys.stderr is None:  # pythonw has no console: keep slot tracebacks and native crash stacks in a log instead
+        from ..extract import projects_home
+        log = projects_home().parent / "logs" / "gui.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        sys.stderr = open(log, "a", encoding="utf-8", buffering=1)
+        faulthandler.enable(sys.stderr)
     try:
         from PySide6.QtWidgets import QApplication
 
