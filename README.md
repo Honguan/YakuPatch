@@ -10,7 +10,16 @@ YakuPatch 把日文遊戲翻譯成中文。它直接修改遊戲的文字檔，�
 
 ### 支援的遊戲引擎
 
-RPG Maker MV／MZ、TyranoScript、Ren'Py、KiriKiri（未加密）、Unity（Mono）、Godot、Artemis、Wolf RPG（未加密散檔）。
+| 引擎 | 支援範圍 | 寫回方式 |
+|---|---|---|
+| RPG Maker MV／MZ | `data/*.json`（圖片、音訊加密不影響） | 直接改寫 JSON |
+| TyranoScript | 散檔或 `app.asar` | 散檔直接改寫；asar 只改檔頭，劇本放在 `app.asar.unpacked/` |
+| Ren'Py | 編譯後的 `.rpyc`（散檔或 `.rpa` 內） | 不改原腳本，新增語言 `game/tl/yakupatch/` |
+| KiriKiri | 未加密 `.xp3` | 不改原封包，新增 `patch.xp3` |
+| Unity | Mono 版：UI、Utage、Naninovel、自訂類別、`Assembly-CSharp.dll` 字串 | 改寫資產檔，字型換成 Windows 內建中文字型 |
+| Godot | `.pck` 內的文字場景與 Godot 3 腳本 | 改寫 `.pck`，字型換成中文字型 |
+| Artemis | `.pfs` 內的劇本與表格 | 不改原封包，新增 `.pfs.NNN` |
+| Wolf RPG | 未加密散檔（地圖、共通事件、資料庫） | 直接改寫，附中文替換字型 |
 
 加密的遊戲不支援，YakuPatch 不會嘗試解密。
 
@@ -93,7 +102,16 @@ YakuPatch translates Japanese games into Chinese. It edits the game's text files
 
 ### Supported engines
 
-RPG Maker MV/MZ, TyranoScript, Ren'Py, KiriKiri (unencrypted), Unity (Mono), Godot, Artemis, and Wolf RPG (unencrypted loose files).
+| Engine | Coverage | How it writes |
+|---|---|---|
+| RPG Maker MV/MZ | `data/*.json` (encrypted images and audio are fine) | Rewrites the JSON |
+| TyranoScript | Loose files or `app.asar` | Loose files in place; for asar, patches the header and puts scripts in `app.asar.unpacked/` |
+| Ren'Py | Compiled `.rpyc` (loose or inside `.rpa`) | Leaves the scripts alone and adds a language in `game/tl/yakupatch/` |
+| KiriKiri | Unencrypted `.xp3` | Leaves the archive alone and adds `patch.xp3` |
+| Unity | Mono builds: UI, Utage, Naninovel, custom classes, `Assembly-CSharp.dll` strings | Rewrites the asset files and switches fonts to a built-in Windows Chinese font |
+| Godot | Text scenes and Godot 3 scripts inside `.pck` | Rewrites the `.pck` and switches fonts to a Chinese font |
+| Artemis | Scripts and tables inside `.pfs` | Leaves the archive alone and adds `.pfs.NNN` |
+| Wolf RPG | Unencrypted loose files (maps, common events, databases) | Rewrites in place and ships a Chinese substitute font |
 
 Encrypted games are not supported. YakuPatch never tries to decrypt them.
 
