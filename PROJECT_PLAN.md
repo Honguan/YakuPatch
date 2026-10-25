@@ -2,35 +2,9 @@
 
 > 開源、不注入的遊戲文本翻譯工具：提取遊戲文本 → 本地模型或 Codex 訂閱翻譯 → 直接寫回遊戲檔案，全程備份且可一鍵還原。
 
-- 版本：v0.5（企劃草案，第五次疊代）
-- 日期：2026-10-24
+- 狀態：v1.0.0 已發佈；功能 F1–F22 全部完成
+- 日期：2026-10-25
 - 授權：GPL-3.0（理由見 §13）
-
-**v0.5 變更摘要**
-- 發佈方式改為參考 BallonsTranslator 的「安裝包一鍵啟動」：免設定壓縮包內含 Python 嵌入版，解壓後雙擊 `launch_win.bat` 即可啟動；另提供一行 PowerShell 安裝腳本。取代原本的 PyInstaller 單一執行檔（§1.2、§12、§15 I6）。
-
-**v0.4 變更摘要**
-- 新增語言預檢（L1）：遊戲已是中文或內建中文語言包時不翻譯；可分辨繁體與簡體。已用使用者遊戲庫實測，抽得到文字的 102 款中有 36 款已是中文（§5.1）。
-- **不做繁簡轉換**：Sakura 譯文維持簡體；移除簡轉繁步驟，OpenCC 只用於辨識（F7、T12）。
-- Sakura 設定參考 BallonsTranslator：API 位址（可填區網 IP）、模型版本、術語表、重試、逾時、取樣參數等；自動啟動時預設只監聽 `127.0.0.1`（§6.7）。
-- 使用者介面設計說明：版面、各分頁、設定、首次啟動精靈、提示與錯誤（§11）。
-
-**v0.3 變更摘要**
-- 交換檔改為「快照 + 日誌」寫入，並由單一寫入者負責；大型遊戲不必每批重寫整檔，GUI 可邊翻邊編輯，也能撤銷整次翻譯（§4.6）。
-- 一致性：提取時自動產生術語種子（E10）；名稱類先翻（T1）；翻完做全文 QA（T13）。
-- 每款遊戲可設定翻譯風格 `style.md`；Codex 開跑前先預估用量（§6.8）。
-- 新增設計原則 P6「遊戲檔案視為不可信資料」與對應的解包安全規則（§3.6）。
-- Unity 字型替換提前到 I4；Plugin 合規測試套件；成功指標；交換檔格式遷移規則。
-- 外部字典：使用者選擇下載後轉成本地詞庫，只用於術語候選的辨識、讀音與既有譯名（§6.10）。
-- G3、G4 已用實際資料驗證：MZ 提取規格以 46 款遊戲核對並補上遺漏項目（§17.1）；佔位符改用實測最佳的 `<n>`（§17.2）；JMnedict 授權已查證。
-- 設計缺口清單 G1–G9（§17）：遊戲指紋、更新後不還原（修正 §9 的降版問題）、MZ 提取規格、佔位符實測、評測集、存檔相容、工作佇列、診斷包。
-
-**v0.2 變更摘要**
-- 全案改為「提取 → 翻譯 → 寫回」三段，以**交換檔**為分界（§3、§4）。
-- 提取、翻譯、寫回各自拆成單元管線（§5、§6、§7）。
-- 新增 Codex 訂閱翻譯後端，參考 BallonsTranslator 的設計（§6.6）。
-- 後端差異改由能力描述 `BackendCaps` 表達，管線內不針對個別後端寫分支判斷（§6.5）。
-- 里程碑改為垂直切片疊代，每一輪都能端到端使用（§15）。
 
 ---
 
@@ -577,7 +551,7 @@ class BackendCaps:
 - **Jiyomi**：尚未查證，暫不採用。
 
 **設計規則**：
-- **不隨程式散佈字典資料**：只提供下載器與轉換器，使用者選擇下載後轉成本地 `dicts/*.sqlite`；`docs/` 與「關於」畫面列出每個來源的出處與授權（CC BY-SA 的標示要求）。
+- **不隨程式散佈字典資料**：只提供下載器與轉換器，使用者選擇下載後轉成本地 `dicts/*.sqlite`；設定的「字典」分頁列出每個來源的出處與授權（CC BY-SA 的標示要求）。
 - **只查候選，不掃全文**：JMnedict 收錄大量同時也是普通詞彙的名稱，對全文比對會產生大量誤判。因此字典只在 E10 查詢術語候選，以及使用者在表格中手動查詢時使用；T6 只比對專案術語表。
 - **優先順序**：手動術語 > 已確認的種子術語 > 字典中文譯名 > 只有讀音（由模型依讀音音譯）。
 - **字典譯名不直接定案**：來源標為 `dict:<字典名>`，仍需人工確認才會成為正式術語，避免同名不同人（例如常見名字）套錯譯名。
@@ -824,56 +798,28 @@ class BackendCaps:
 - **GPL-3.0**：可依授權移植 LunaTranslator、BallonsTranslator（都是 GPL-3.0）的程式碼並標註出處；其他依賴（MIT／LGPL／BSD）都相容。
 - 儲存庫不收錄任何遊戲檔案或模型檔；測試樣本自行製作。
 - MTool 是閉源軟體，只參考公開行為，不反編譯、不複製。
-- README 註明：僅供使用者對自己合法持有的遊戲做個人翻譯；分享時只分享交換檔，不分享遊戲原檔。
-- **貢獻引擎 Plugin**：`CONTRIBUTING.md` 說明介面；新 Plugin 只要附上一個最小樣本遊戲並通過合規測試套件（§14.1），即可合併。
+- README 註明：僅供使用者對自己合法持有的遊戲做個人翻譯；分享時只分享譯文分享檔，不分享遊戲原檔。
+- **貢獻引擎 Plugin**：介面見 `yakupatch/engines/base.py`；新 Plugin 只要附上一個最小樣本遊戲並通過合規測試套件（§14.1），即可合併。
 
-儲存庫結構：
+儲存庫結構（扁平模組）：
 ```
 yakupatch/
-  engines/      base.py（EnginePlugin、Container、Segment）, rpgmaker_mvmz.py, renpy.py ...
-  extract/      detector.py, unpacker.py, locator.py, decoder.py, parser.py,
-                classifier.py, segmenter.py, annotator.py, deduper.py,
-                glossary_seeder.py, merger.py
-  exchange/     store.py（單一寫入者、快照 + 日誌）, batches.py（匯出入）, migrations/
-  translate/    work.py, orchestrator.py
-                units/  selector.py, normalizer.py, masker.py, cache.py, context.py,
-                        glossary.py, batcher.py, prompt.py, dispatcher.py,
-                        parser.py, validator.py, postprocess.py, writer.py,
-                        consistency_qa.py, estimate.py
-                backends/  caps.py, errors.py, sakura.py, codex.py, openai_compat.py
-  writeback/    loader.py, selector.py, wrapper.py, encode_guard.py, renderer.py,
-                verifier.py, committer.py
-  backup/       backup.py, restore.py
-  encoding/     detect.py, cp932_fallback.py
-  safety/       safe_path.py（路徑跳脫檢查、解包大小上限）
-  dicts/        downloaders/（wikidata、jmnedict、personal_names、vndb）, importers/（自備詞庫）, lookup.py
-  gui/
-tests/
-  conformance/  Plugin 合規測試套件（§14.1），每個 Plugin 自動套用
-  fixtures/     每種引擎的最小樣本遊戲
-docs/           使用說明、引擎支援表、遊戲規則檔與交換檔格式說明
+  core.py         CLI 與 GUI 共用的 API、遊戲庫、設定、工作佇列、批次處理（F16）
+  cli.py          命令列
+  extract.py      A 段：偵測後提取、語言預檢、術語種子、合併
+  pipeline.py     B 段：選取、快取、前文、場景摘要、分批、派送、驗證、寫入 Store
+  translate.py    正規化、佔位符遮蔽、驗證、後處理、換行
+  writeback.py    C 段：寫回計畫與提交
+  exchange.py     Store（快照 + 日誌）、分批檔與分享檔匯出入
+  backup.py       備份與還原
+  vfs.py          封包內檔案的讀寫
+  encoding.py、langdetect.py、jsonspan.py、safety.py、fsutil.py、qa.py、dicts.py、clr.py、depcheck.py
+  backends/       sakura.py、codex.py、openai_compat.py（BackendCaps 與錯誤分類在 __init__.py）
+  engines/        base.py（EnginePlugin）與 RPG Maker MV／MZ、Tyrano、Ren'Py、KiriKiri、Unity、Godot、Artemis、Wolf
+  gui/            window.py、settings.py、models.py、圖示
+tests/            單元、合規（test_conformance.py）、各引擎與 GUI 測試；fixtures/ 為自製最小樣本
+scripts/          安裝、啟動、建置、鎖定依賴、評測與稽核工具
 ```
-
-**I0 實際結構**（先用扁平模組，檔案變大再依上方結構拆分）：`fsutil.py`、`safety.py`、`encoding.py`、`jsonspan.py`（JSON 字串位置掃描與原地替換）、`langdetect.py`、`translate.py`（遮罩／驗證／後處理）、`extract.py`、`exchange.py`（Store、匯出入）、`writeback.py`、`backup.py`、`cli.py`、`engines/{base,rpgmaker_mz}.py`；`tests/` 用標準函式庫 `unittest`（`test_conformance.py`、`test_units.py`、`helpers.py`）。
-
-**I0 與本企劃的差異**（以程式為準）：
-- 提取順序：先切句（E6 Segmenter）再分類（E7 Classifier），因為分類要看整段文字。
-- `refs` 為物件陣列 `[{"file","locs"}]`；日誌行格式 `{"run","id","set","old","ts"}`，`old` 供 `undo` 使用。
-- Store 以行程內鎖（`threading.RLock`）串行化寫入，未另開寫入執行緒；不防多個行程同時開同一專案。
-- 事件指令 355／655（腳本）、657（外掛參數顯示）一律不提取；357 提取參數物件的字串值，參數本身是 JSON（結構／陣列參數）時遞迴拆開，位置以 `~j` 標記「此字串再解碼為 JSON」。鍵名含 text／message／label／title／caption／desc／help 且不含 file／image／picture／icon／sound／font／symbol／switch／variable 等字樣的標 `system` 送翻，其餘標 `uncertain`，預設不送翻。
-- I0 不提取 `js/plugins.js`。
-- 尚未實作（程式內以 `shortcut:` 註記）：容器解包、W3 自動換行、charset-normalizer 編碼偵測、備份記錄新建檔案。
-
-**I1 實際結構與差異**：
-- 新增 `pipeline.py`（Work、選取、快取、前文、術語、分批、估算、派送與 Store 寫回）、`backends/{__init__,sakura}.py`（BackendCaps、錯誤分類、設定與 urllib Client）、`engines/rpgmaker_mv.py`；沿用 I0 的 `translate.py` 單元、Store、MZ 解析器及備份還原，不拆分原有模組。
-- T1 先處理 `name`／`system`，只回填原有空白 `seed` 名稱術語，保持手動詞條；續跑從 Store 已翻名稱恢復種子。T5 使用去重記錄首次出現位置的前 3 筆同檔案記錄，送出前刷新已翻前文；不是事件場景樹。
-- Sakura 使用固定 lines 模板；前文放在待譯內容前綴，解析時依行數丟棄前綴譯文。單句失敗仍依序去前文、提高溫度重試。整批行數或驗證失敗拆半；連線暫時失敗依 §6.7 預設重試 3 次（可設 0–5），模型明確拒絕後持續拆半至單句，只有單句仍拒絕才標 `errors=refused` 且不自動續送。授權、額度與設定錯誤停止新工作並保留進度。
-- 每批由主執行緒透過 `Store.update_many` 寫入；額外記錄 `errors`、`attempts`，`by=sakura:模型/版本-p1`。只在驗證通過後存入專案 SQLite 快取；鍵包含後端設定、模型／prompt、遮罩原文與對照、術語及前文／說話者。尚無全域快取。
-- T11 沿用 I0 驗證，Sakura 的重複門檻依 §6.7 預設 20；外部匯入保留原本 4。T12 沿用還原遮罩與空白，不額外改標點或轉換繁簡。T2 補上單獨 CR 正規化，T3 補上兩種佔位符同時存在的避碰。
-- token 以每字 1.5 粗估，請求預算計入固定 prompt、術語與前文，每批最多 16 筆；時間以每波 30 秒估算，尚無 tokenizer／歷史耗時校準。`--dry-run` 離線且不寫檔；正式翻譯會讀 health／props／models 後顯示預估。Sakura 不計量，使用者執行 translate 即直接開始，不另要求確認。
-- MV 共用 MZ parse/render，`www/` 由既有根目錄搜尋處理；圖片／音訊加密不影響明文 JSON，`.rpgmvp` 不阻擋翻譯。保留 System.json 存在與逐檔 JSON 檢查；加密或不支援的 JSON 明確拒絕，不解密。
-- I1 沒有 GUI、模型自動啟停、場景摘要、自由風格、Codex/json_ids、T13 QA 或評測集；不修改 I0 的既有限制。已連線的 urllib socket 無法取消，Ctrl+C 後行程結束最多仍等到 timeout；工作執行緒不直接寫 Store。
-- 測試與真實驗收數字、未通過清單、shortcuts 及審查重點見 `docs/I1_REPORT.md`。2026-10-23 完成實機驗收：10 款啟動、3 款還原雜湊比對通過。
 
 ---
 
@@ -913,12 +859,12 @@ docs/           使用說明、引擎支援表、遊戲規則檔與交換檔格�
 | 疊代 | 內容 | 驗收標準 |
 |---|---|---|
 | **I0 骨架** | RPG Maker MZ 單一引擎走完 A→B→C：提取、交換檔（Store 快照 + 日誌）、匯出／匯入分批檔、寫回、備份還原；安全規則；合規測試套件；CLI | MZ 通過合規測試；手填譯文匯入後遊戲可正常顯示並能還原 |
-| **I1 本地翻譯** | 完成（2026-10-23）：MV/MZ 隨機 10 款翻譯寫回，10 款以 `Game.exe` 實機啟動並顯示譯文（使用者確認）；02_mv、06_mz、10_mz restore 後 data 雜湊與原版一致，再 apply 與原譯版一致。已知問題見 `C:\YakuPatchTest\_quality\REPORT.md` | MV/MZ 隨機 3 款可完整翻譯、啟動、還原 |
-| **I2 介面 + Codex** | 完成（2026-10-23）：階段 A（Core API、工作佇列、Codex 登入與後端、用量預估、撤銷整次翻譯、診斷包、評測集）已實作並通過離線測試；Codex 評測與 3 款 MV/MZ 實機驗收通過；階段 B GUI 已實作，通過離線與 offscreen 測試，並以程式驅動 GUI 完成 3 款 MV/MZ 實機流程（Codex 2、Sakura 1）；使用者親手操作 GUI 驗收通過（2026-10-23，MV 1 款 Sakura 全部翻譯 8,156 句，回報正常）。詳見 `docs/I2_REPORT.md` | 一般使用者不碰命令列即可完成全流程；Codex 額度用完時能暫停並續跑 |
-| **I3 一致性 + 文字腳本引擎** | 已實作（2026-10-23）：術語種子、外部字典（§6.10）、T13 全文 QA、`style.md`、自動換行；Ren'Py、Tyrano。實機驗收：Tyrano 3 款、Ren'Py 1 款（遊戲庫只有 1 款日文且無中文的 Ren'Py）寫回後讀回全為譯文，Ren'Py `compile` 無錯、0 句對話缺譯；QA 在 3 款抓到植入的同名異譯；4 款以 Codex 真實譯文重跑後，使用者實機檢查通過。詳見 `docs/I3_REPORT.md` | 各引擎隨機 3 款實機通過；QA 能抓出刻意植入的同名異譯 |
-| **I4 封包引擎** | 完成（2026-10-24）：KiriKiri（未加密 XP3，譯文寫成新的 `patch.xp3`）實機通過 1 款；Unity Mono 的 UI 元件、Utage、Naninovel、自訂類別、`Assembly-CSharp.dll` 字串與字型統一（F20），隨機 3 款實機全部通過；I2 Localization、Fungus、IL2CPP 未做。詳見 `docs/I4_REPORT.md` | Unity 隨機 3 款至少 2 款可用且無方塊字；KiriKiri 未加密款可用 |
-| **I5 擴充** | 完成（2026-10-25）：Godot（`.pck` 內 `.tscn`／`.tres` 文字屬性、Godot 3 `.gdc` 字串、字型替換）已實作，1 款實機通過；Artemis（`.pfs` 內 `.ast`／`.tbl`，譯文寫成新的 `.pfs.NNN`）1 款實機通過；Wolf RPG（散檔 `.mps`／`CommonEvent.dat`／資料庫，CP932 策略 D：罕用漢字替代＋附字型）1 款實機通過。詳見 `docs/I5_REPORT.md`。CatSystem2、SRPG Studio 暫緩（庫內日文樣本的劇本／專案資料全部加密，依 §1.3 不解密），未達各引擎 1 款 | 各引擎至少 1 款實機通過 |
-| **I6 發佈** | 完成（2026-10-25，v1.0.0 已發佈於 GitHub Releases）：`requirements.lock`、`install.ps1`（建置壓縮包也用它）、`launch_win.bat` 依賴檢查與補裝、啟動進度與錯誤顯示、GUI 錯誤記錄 `logs/gui.log`、GitHub Actions（windows-latest 建置並以內附 Python 跑全部測試）、GUI 新版提示、中英雙語 README（含環境需求）；壓縮包與 `iex` 安裝在清空 PATH 的環境下可啟動 GUI，19_godot 走完提取→翻譯→寫回→啟動→還原。未在乾淨電腦實機驗收，改在 README 寫明環境需求（內附 Python，不需另外安裝；缺 Visual C++ 可轉散發套件時啟動器顯示下載網址）。詳見 `docs/I6_REPORT.md`。原規劃：安裝包一鍵啟動（§12.1）：免設定壓縮包 `YakuPatch_win.zip`（Python 嵌入版 + 依賴 + `launch_win.bat`）、一行 PowerShell 安裝腳本 `install.ps1`、依賴檢查與補裝、GitHub Actions 自動建置、使用說明、v1.0 | 在未安裝 Python 的乾淨 Windows 10／11 電腦上：壓縮包解壓後雙擊 `launch_win.bat`、以及執行安裝腳本，兩種方式都能啟動 GUI，並用隨機 1 款遊戲走完提取→翻譯→寫回→啟動→還原 |
+| **I1 本地翻譯** | 完成（2026-10-23）：MV/MZ 隨機 10 款翻譯寫回，10 款以 `Game.exe` 實機啟動並顯示譯文（使用者確認）；02_mv、06_mz、10_mz restore 後 data 雜湊與原版一致，再 apply 與原譯版一致 | MV/MZ 隨機 3 款可完整翻譯、啟動、還原 |
+| **I2 介面 + Codex** | 完成（2026-10-23）：階段 A（Core API、工作佇列、Codex 登入與後端、用量預估、撤銷整次翻譯、診斷包、評測集）已實作並通過離線測試；Codex 評測與 3 款 MV/MZ 實機驗收通過；階段 B GUI 已實作，通過離線與 offscreen 測試，並以程式驅動 GUI 完成 3 款 MV/MZ 實機流程（Codex 2、Sakura 1）；使用者親手操作 GUI 驗收通過（2026-10-23，MV 1 款 Sakura 全部翻譯 8,156 句，回報正常） | 一般使用者不碰命令列即可完成全流程；Codex 額度用完時能暫停並續跑 |
+| **I3 一致性 + 文字腳本引擎** | 已實作（2026-10-23）：術語種子、外部字典（§6.10）、T13 全文 QA、`style.md`、自動換行；Ren'Py、Tyrano。實機驗收：Tyrano 3 款、Ren'Py 1 款（遊戲庫只有 1 款日文且無中文的 Ren'Py）寫回後讀回全為譯文，Ren'Py `compile` 無錯、0 句對話缺譯；QA 在 3 款抓到植入的同名異譯；4 款以 Codex 真實譯文重跑後，使用者實機檢查通過 | 各引擎隨機 3 款實機通過；QA 能抓出刻意植入的同名異譯 |
+| **I4 封包引擎** | 完成（2026-10-24）：KiriKiri（未加密 XP3，譯文寫成新的 `patch.xp3`）實機通過 1 款；Unity Mono 的 UI 元件、Utage、Naninovel、自訂類別、`Assembly-CSharp.dll` 字串與字型統一（F20），隨機 3 款實機全部通過；I2 Localization、Fungus、IL2CPP 未做 | Unity 隨機 3 款至少 2 款可用且無方塊字；KiriKiri 未加密款可用 |
+| **I5 擴充** | 完成（2026-10-25）：Godot（`.pck` 內 `.tscn`／`.tres` 文字屬性、Godot 3 `.gdc` 字串、字型替換）已實作，1 款實機通過；Artemis（`.pfs` 內 `.ast`／`.tbl`，譯文寫成新的 `.pfs.NNN`）1 款實機通過；Wolf RPG（散檔 `.mps`／`CommonEvent.dat`／資料庫，CP932 策略 D：罕用漢字替代＋附字型）1 款實機通過。CatSystem2、SRPG Studio 暫緩（庫內日文樣本的劇本／專案資料全部加密，依 §1.3 不解密），未達各引擎 1 款 | 各引擎至少 1 款實機通過 |
+| **I6 發佈** | 完成（2026-10-25，v1.0.0 已發佈於 GitHub Releases）：`requirements.lock`、`install.ps1`（建置壓縮包也用它）、`launch_win.bat` 依賴檢查與補裝、啟動進度與錯誤顯示、GUI 錯誤記錄 `logs/gui.log`、GitHub Actions（windows-latest 建置並以內附 Python 跑全部測試）、GUI 新版提示、中英雙語 README（含環境需求）；壓縮包與 `iex` 安裝在清空 PATH 的環境下可啟動 GUI，19_godot 走完提取→翻譯→寫回→啟動→還原。未在乾淨電腦實機驗收，改在 README 寫明環境需求（內附 Python，不需另外安裝；缺 Visual C++ 可轉散發套件時啟動器顯示下載網址） | 在未安裝 Python 的乾淨 Windows 10／11 電腦上：壓縮包解壓後雙擊 `launch_win.bat`、以及執行安裝腳本，兩種方式都能啟動 GUI，並用隨機 1 款遊戲走完提取→翻譯→寫回→啟動→還原 |
 
 ### 15.1 成功指標
 以使用者遊戲庫（365 款）為基準，每輪疊代結束時量測：
@@ -1023,17 +969,15 @@ v0.3 審查時找到的缺口。「已定案」表示設計已寫進本企劃；
 
 ---
 
-## 18. 待決事項
-1. ~~GitHub 帳號或組織~~ 已定：<https://github.com/Honguan/YakuPatch>。
+## 18. 已決事項
+儲存庫：<https://github.com/Honguan/YakuPatch>。
 
-### 已決事項
 | 日期 | 決定 |
 |---|---|
 | 2026-10-25 | 場景摘要以「檔案」為場景單位，每波翻譯後各檔一次摘要呼叫；摘要沿用後端既有的 translations 回覆格式（id 0），不另加 schema；只用在對話句，Sakura 不使用；用量預估含摘要呼叫 |
 | 2026-10-25 | 譯文分享檔不含遊戲原文：每句只存 id、遮蔽後原文的 SHA-256 前 16 碼與譯文；匯入時 id 與雜湊都相符才套用，引擎不同直接拒絕，並走與分批檔相同的驗證與撤銷 |
 | 2026-10-25 | OpenAI 相容後端沿用 Codex 的 json_ids 提示詞與格式；API 金鑰依 API 位址存在系統認證管理員（或環境變數 `YAKUPATCH_API_KEY`），不寫入 config.json；非本機位址視為計費後端，翻譯前顯示用量預估 |
-| 2026-10-24 | 發佈改為 BallonsTranslator 式安裝包一鍵啟動：免設定壓縮包（Python 嵌入版，雙擊 `launch_win.bat`）＋一行 PowerShell 安裝腳本，取代 2026-10-23 的 PyInstaller `YakuPatch.exe`（§12.1、§15 I6） |
-| 2026-10-23 | ~~最終交付為可下載、雙擊即可啟動的 `YakuPatch.exe`（PyInstaller onedir zip，發佈於 GitHub Releases），不要求使用者安裝 Python~~（已由 2026-10-24 取代） |
+| 2026-10-24 | 發佈改為 BallonsTranslator 式安裝包一鍵啟動：免設定壓縮包（Python 嵌入版，雙擊 `launch_win.bat`）＋一行 PowerShell 安裝腳本（§12.1、§15 I6） |
 | 2026-10-22 | 各疊代實機驗收改為隨機 3 款（原 I1、I4 為 10 款）；每階段先跑單元／合規測試，再用 3 款走完提取→翻譯→寫回→啟動→還原 |
 | 2026-10-21 | Codex 後端內建，於 I2 實作（§6.6）；分批交換檔仍保留作為替代路徑 |
 | 2026-10-21 | 不做繁簡轉換；Sakura 譯文維持簡體（§6.7） |
