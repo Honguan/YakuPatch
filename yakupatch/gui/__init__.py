@@ -16,12 +16,14 @@ def main() -> int:
         sys.stderr = open(log, "a", encoding="utf-8", buffering=1)
         faulthandler.enable(sys.stderr)
     try:
+        from PySide6.QtGui import QIcon
         from PySide6.QtWidgets import QApplication
 
         from .window import MainWindow
 
         app = QApplication.instance() or QApplication(sys.argv)
         app.setApplicationName("YakuPatch")
+        app.setWindowIcon(QIcon(str(Path(__file__).with_name("icon.ico"))))
         window = MainWindow()
         window.show()
     except BaseException:

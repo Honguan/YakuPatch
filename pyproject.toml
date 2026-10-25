@@ -22,3 +22,6 @@ yakupatch-gui = "yakupatch.gui:main"
 
 [tool.setuptools.packages.find]
 include = ["yakupatch*"]
+
+[tool.setuptools.package-data]
+"yakupatch.gui" = ["icon.ico", "icon.png"]
