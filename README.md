@@ -60,7 +60,8 @@
 | Python | **免安裝壓縮包與安裝腳本已內附 Python 3.12，不需要另外安裝。** 只有從原始碼執行時，才需要自行安裝 Python 3.11 以上 |
 | Visual C++ 可轉散發套件（x64） | 大多數電腦已有。缺少時，啟動器會顯示[下載網址](https://aka.ms/vs/17/release/vc_redist.x64.exe) |
 | 翻譯後端（擇一） | **Sakura**：在 YakuPatch 內下載並啟動，或自行啟動的 llama-server（本機或區網）<br>**Codex**（實驗性）：有 Codex 額度的 ChatGPT 帳號<br>**OpenAI 相容 API**：API 位址與金鑰（本機伺服器可不填金鑰）；需選通用對話模型 |
-| 網路 | 安裝腳本、補裝套件、Codex、雲端 API 需要；使用本機 Sakura 翻譯時不需要 |
+| 本地 Sakura | 建議有 4 GB 以上顯示記憶體的顯示卡（NVIDIA、AMD、Intel 皆可；沒有也能用 CPU，但很慢）；模型需 1–10 GB 硬碟空間 |
+| 網路 | 安裝腳本、補裝套件、下載模型、Codex、雲端 API 需要；模型下載後用本機 Sakura 翻譯不需要 |
 
 ---
 
@@ -77,7 +78,9 @@
   * 第一次啟動可能要等幾十秒，命令視窗會顯示進度點，主視窗出現後自動關閉。
 
 * **第二步：準備翻譯後端**
-  * 推薦：在「設定 → 本地 Sakura」下載推薦模型與 llama.cpp 後按「啟動伺服器」（或自行啟動 llama-server，在「設定」填入位址後按「測試連線」）；或在「設定」登入 Codex；或在「設定 → OpenAI 相容」填入 API 位址、金鑰與模型。
+  * **本地 Sakura（推薦）**：開啟「設定 → 本地 Sakura」，在模型清單選標示「推薦」的模型按「下載選取的模型」，再按「下載最新 llama.cpp」，最後按「啟動伺服器」。Sakura 位址會自動填好；勾選「啟動 YakuPatch 時自動開啟伺服器」之後就不用再手動啟動。
+  * **用另一台電腦跑模型**：在「本地 Sakura」填入那台電腦的顯示卡記憶體，選模型後按「匯出啟動包…」。把資料夾複製過去，雙擊 `start_sakura.bat`，再到這台的「設定 → Sakura」填入 `http://那台的IP:8080/v1` 並按「測試連線」。
+  * **其他後端**：在「設定 → Codex」登入，或在「設定 → OpenAI 相容」填入 API 位址、金鑰與模型。
 
 * **第三步：加入遊戲並翻譯**
   * 把遊戲資料夾加入左側的遊戲庫，依上方步驟條操作：偵測 → 語言預檢 → 提取 → 翻譯 → 寫回。
@@ -96,7 +99,7 @@ yakupatch.bat share     "D:\Games\MyGame"
 yakupatch.bat batch     "D:\Games\GameA" "D:\Games\GameB" --backend sakura --apply
 yakupatch.bat import    "D:\Games\MyGame" MyGame.yakupatch.jsonl
 yakupatch.bat restore   "D:\Games\MyGame"
-yakupatch.bat sakura models                 & rem 模型清單與本機推薦
+yakupatch.bat sakura models
 yakupatch.bat sakura get <模型檔名>
 yakupatch.bat sakura llama
 yakupatch.bat sakura serve
@@ -114,7 +117,8 @@ yakupatch.bat sakura kit <模型檔名> --output D:\SakuraKit --vram 12
 |:---:|---|
 | 專案、設定、字典 | `%USERPROFILE%\.yakupatch`（更新或刪除程式資料夾不影響） |
 | 遊戲備份 | 遊戲資料夾內的 `_yakupatch_backup\` |
-| 錯誤記錄 | `%USERPROFILE%\.yakupatch\logs\gui.log` |
+| Sakura 模型與 llama.cpp | `%USERPROFILE%\.yakupatch\sakura\models`、`sakura\llama` |
+| 錯誤記錄 | `%USERPROFILE%\.yakupatch\logs\gui.log`；Sakura 伺服器為 `llama-server.log` |
 
 **更新**：下載新版壓縮包覆蓋程式資料夾，或重新執行安裝腳本。有新版時，視窗下方的狀態列會顯示下載連結。
 

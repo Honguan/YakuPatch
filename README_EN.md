@@ -60,7 +60,8 @@
 | Python | **The portable zip and the install script bundle Python 3.12; you do not need to install Python.** Only running from source needs Python 3.11 or later |
 | Visual C++ Redistributable (x64) | Most PCs already have it. If it is missing, the launcher shows the [download link](https://aka.ms/vs/17/release/vc_redist.x64.exe) |
 | Translation backend (one of) | **Sakura**: downloaded and started inside YakuPatch, or a llama-server you start yourself (local or LAN)<br>**Codex** (experimental): a ChatGPT account with Codex quota<br>**OpenAI-compatible API**: an API address and key (a local server needs no key); pick a general chat model |
-| Network | Needed for the install script, package repair, Codex and cloud APIs. Not needed to translate with a local Sakura server |
+| Local Sakura | A GPU with 4 GB or more of VRAM is recommended (NVIDIA, AMD or Intel; CPU works but is slow). Models need 1–10 GB of disk |
+| Network | Needed for the install script, package repair, model downloads, Codex and cloud APIs. Not needed to translate with a downloaded local Sakura model |
 
 ---
 
@@ -77,7 +78,9 @@
   * The first start can take a few dozen seconds. The console window shows progress dots and closes when the main window opens.
 
 * **Step 2: Set up a backend**
-  * Recommended: under Settings → 本地 Sakura (Local Sakura), download the recommended model and llama.cpp, then click 啟動伺服器 (Start server) (or start your own llama-server, enter its address in Settings and click 測試連線 (Test connection)); or sign in to Codex in Settings; or enter an API address, key and model under Settings → OpenAI 相容 (OpenAI-compatible).
+  * **Local Sakura (recommended)**: open Settings → 本地 Sakura (Local Sakura), select the model marked 推薦 (Recommended) and click 下載選取的模型 (Download), then 下載最新 llama.cpp (Download llama.cpp), then 啟動伺服器 (Start server). The Sakura address fills in automatically; tick 啟動 YakuPatch 時自動開啟伺服器 (Start with YakuPatch) to skip this next time.
+  * **Run the model on another PC**: in 本地 Sakura, enter that PC's VRAM, select a model and click 匯出啟動包… (Export kit). Copy the folder over, double-click `start_sakura.bat`, then on this PC enter `http://<that PC's IP>:8080/v1` under Settings → Sakura and click 測試連線 (Test connection).
+  * **Other backends**: sign in under Settings → Codex, or enter an API address, key and model under Settings → OpenAI 相容 (OpenAI-compatible).
 
 * **Step 3: Add a game and translate**
   * Add the game folder to the library on the left and follow the step bar at the top: Detect → Language check → Extract → Translate → Apply.
@@ -98,7 +101,7 @@ yakupatch.bat share     "D:\Games\MyGame"
 yakupatch.bat batch     "D:\Games\GameA" "D:\Games\GameB" --backend sakura --apply
 yakupatch.bat import    "D:\Games\MyGame" MyGame.yakupatch.jsonl
 yakupatch.bat restore   "D:\Games\MyGame"
-yakupatch.bat sakura models                 & rem models and what suits this PC
+yakupatch.bat sakura models
 yakupatch.bat sakura get <model file>
 yakupatch.bat sakura llama
 yakupatch.bat sakura serve
@@ -116,7 +119,8 @@ Run `yakupatch.bat --help` for every command and option.
 |:---:|---|
 | Projects, settings, dictionaries | `%USERPROFILE%\.yakupatch` (updating or deleting the program folder leaves them intact) |
 | Game backups | `_yakupatch_backup\` inside the game folder |
-| Error log | `%USERPROFILE%\.yakupatch\logs\gui.log` |
+| Sakura models and llama.cpp | `%USERPROFILE%\.yakupatch\sakura\models`, `sakura\llama` |
+| Error log | `%USERPROFILE%\.yakupatch\logs\gui.log`; the Sakura server writes `llama-server.log` |
 
 **Update**: unzip the new release over the program folder, or run the install script again. When a new version is out, the status bar shows a download link.
 
