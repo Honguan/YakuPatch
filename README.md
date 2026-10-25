@@ -2,10 +2,10 @@
 
 YakuPatch 把日文遊戲翻譯成中文。它直接修改遊戲的文字檔，不注入程式，寫入前會先備份，可以隨時還原。
 
-目前支援 RPG Maker MV／MZ、TyranoScript（含 `app.asar`）、Ren'Py（含 `.rpa`）、KiriKiri（未加密 `.xp3`）與 Unity（Mono；UI、Utage、Naninovel、自訂類別、`Assembly-CSharp.dll` 字串），翻譯後端有 Sakura（本地模型）與 Codex（實驗性）。
+目前支援 RPG Maker MV／MZ、TyranoScript（含 `app.asar`）、Ren'Py（含 `.rpa`）、KiriKiri（未加密 `.xp3`）、Unity（Mono；UI、Utage、Naninovel、自訂類別、`Assembly-CSharp.dll` 字串）、Godot（`.pck` 內的文字場景與 Godot 3 腳本）、Artemis（`.pfs`）與 Wolf RPG（未加密散檔），翻譯後端有 Sakura（本地模型）與 Codex（實驗性）。
 
 > [!NOTE]
-> 專案仍在開發中。I1（MV/MZ、Sakura、命令列）與 I2（圖形介面、Codex）已完成；I3（全文 QA、外部字典、自動換行、Tyrano、Ren'Py）已完成；I4（KiriKiri、Unity）已完成。設計見 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
+> 專案仍在開發中。I1（MV/MZ、Sakura、命令列）與 I2（圖形介面、Codex）已完成；I3（全文 QA、外部字典、自動換行、Tyrano、Ren'Py）已完成；I4（KiriKiri、Unity）已完成；I5（Godot、Artemis、Wolf RPG）已完成，CatSystem2、SRPG Studio 因樣本加密暫緩。設計見 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
 
 ## 功能
 

@@ -1,5 +1,6 @@
 import io
 import json
+from pathlib import Path
 import shutil
 import sqlite3
 import unittest
@@ -94,6 +95,9 @@ class Pipeline(unittest.TestCase):
         result = pipeline.run(self.store, self.codes, backend, sleep=waits.append)
         self.assertEqual((result['translated'], result['failed']), (2, 0))
         self.assertEqual(waits, [1])
+        events = [json.loads(line) for line in Path(result['log']).read_text('utf-8').splitlines()]
+        self.assertIn({'event': 'transient', 'attempt': 1, 'error': 'timeout'},
+                      [{k: e[k] for k in ('event', 'attempt', 'error') if k in e} for e in events])
         self.assertTrue(any(temp is not None for _, temp in backend.calls))
 
     def test_interrupt_preserves_completed_batches(self):
@@ -108,6 +112,23 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(self.run_fake(next_backend)['translated'], 2)
         self.assertFalse(any('こんにちは' in c[0]['text'] for c in next_backend.calls))
 
+    def test_merged_lines_are_translated_joined_and_split_again(self):
+        self.small('「いや、ダメとは言わんが。お前いっつも、\nパンくずぽろぽろこぼすから」')
+        one = '「不，我不是说不行。只是你总是，会掉面包屑」'
+        backend = Fake(lambda obj, temp, n: one)                 # always one line, as Sakura does here
+        result = self.run_fake(backend)
+        self.assertEqual((result['translated'], result['failed']), (1, 0))
+        self.assertEqual(backend.calls[-1][0]['text'], ['「いや、ダメとは言わんが。お前いっつも、パンくずぽろぽろこぼすから」'])
+        self.assertEqual(self.store.records['0']['dst'], '「不，我不是说不行。\n只是你总是，会掉面包屑」')
+
+    def test_resplit(self):
+        self.assertEqual(translate.join_lines(['I am', 'here', '友人', 'です']), 'I am here友人です')
+        self.assertEqual(translate.resplit('甲乙丙丁戊己庚辛', ['あいうえ', 'かきくけ']), '甲乙丙丁\n戊己庚辛')
+        self.assertEqual(translate.resplit('甲乙，丙丁戊己庚辛', ['あいうえ', 'かきくけ']), '甲乙，\n丙丁戊己庚辛')  # nearby comma
+        self.assertEqual(translate.resplit('甲<0>乙', ['あ<0>', 'い', 'う']), '甲\n<0>\n乙')         # placeholder intact
+        self.assertIsNone(translate.resplit('甲', ['あ', 'い']))
+        self.assertEqual(translate.postprocess('说I　LOVE　you。　好', {}, ('', '')), '说I LOVE you。　好')
+
     def test_validation_failure_and_line_mismatch(self):
         self.small('\\C[2]こんにちは\\C[0]', 'こんばんは')
         backend = Fake(lambda obj, temp, n: '説明です' if len(obj['text']) > 1 else '你好')
@@ -118,6 +139,11 @@ class Pipeline(unittest.TestCase):
         self.assertIn('placeholders', failed['errors'])
         self.assertEqual(failed['status'], 'failed')
         self.assertIn('failed', failed['flags'])
+        log = [json.loads(line) for line in Path(result['log']).read_text('utf-8').splitlines()]
+        self.assertEqual(Path(result['log']).parent, self.store.dir.parent.parent / 'logs')     # tool data, not the game
+        self.assertEqual([e['event'] for e in log], ['start', 'failed', 'end'])
+        self.assertEqual((log[1]['id'], log[1]['response'], log[1]['src']), ('0', '你好', '\\C[2]こんにちは\\C[0]'))
+        self.assertEqual(log[2]['failed'], 1)
 
     def test_fatal_errors_leave_pending_and_refusal_is_not_resent(self):
         self.small('こんにちは')
