@@ -8,6 +8,8 @@ STYLES = {"<{}>": re.compile(r"<(\d+)>"), "⟦{}⟧": re.compile(r"⟦(\d+)⟧")
 _EXTRA = re.compile(r"^\s*(翻[譯译]|译文|譯文|以下是|Translation)\s*[:：]?", re.I)
 _REPEAT = re.compile(r"(.{1,20}?)\1{3,}", re.S)
 _KATAKANA = re.compile(r"[ァ-ヺー]")
+_KANA_ONLY = re.compile(r"[ぁ-ゖァ-ヺ]")                     # without ・ and ー, which also mark Chinese text
+_KANA_TAG = re.compile(r"<[^<>\n]*[ぁ-ゖァ-ヺ][^<>\n]*>")
 
 
 def normalize(text: str) -> tuple[str, tuple[str, str]]:
@@ -62,7 +64,12 @@ def validate(src: str, dst: str, masks: dict[str, str], repeat_threshold: int = 
     loanword = len(_KATAKANA.findall(plain_src)) * 2 >= len(plain_src)
     if len(plain_src) >= 4 and (ratio > 3.0 or ratio < 0.3 and not loanword):
         errors.append("length_ratio")
-    if len(plain_dst) >= 4 and len(KANA.findall(plain_dst)) / len(plain_dst) > 0.3:
+    # A speaker line (おじさん\n「…」) or name tag (<おじさん>) copied as is stays Japanese while the rest is translated.
+    # Only the first line: kana pen names in credits (CG担当：もりの) are meant to stay.
+    head = src.split("\n", 1)[0].strip()
+    copied = "\n" in src and len(_KANA_ONLY.findall(head)) >= 2 and dst.split("\n", 1)[0].strip() == head or \
+        any(tag in dst for tag in _KANA_TAG.findall(src))
+    if copied or len(plain_dst) >= 4 and len(KANA.findall(plain_dst)) / len(plain_dst) > 0.3:
         errors.append("kana_residue")
     repeat = _REPEAT if repeat_threshold == 4 else re.compile(r"(.{1,20}?)\1{" + str(repeat_threshold - 1) + r",}", re.S)
     if repeat.search(dst) and not repeat.search(src):

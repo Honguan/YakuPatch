@@ -33,7 +33,7 @@ class RpgMakerMZ(EnginePlugin):
     name = "rpgmaker-mz"
     version = "1.0.0"
     default_encoding = "utf-8"
-    control_codes = [r"\\[A-Za-z]+(?:\[[^\]]*\])?", r"\\[{}\\.|!><^$]"]
+    control_codes = [r"\\[A-Za-z]+(?:\[[^\]]*\])?", r"\\[{}\\.|!><^$]", r"%\d"]    # %1: battle message arguments
 
     def detect(self, game_dir: Path) -> float:
         if not (game_dir / "data" / "System.json").is_file():
