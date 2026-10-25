@@ -1,6 +1,6 @@
 # I5 交付報告
 
-分支：`feat/i5`（從 `main` ecd62bb 開）。日期：2026-10-24。進行中：Godot、Artemis、Wolf RPG 已完成並實機通過。
+分支：`feat/i5`（從 `main` ecd62bb 開）。日期：2026-10-24～25。已完成：Godot、Artemis、Wolf RPG 各 1 款實機通過；CatSystem2、SRPG Studio 因庫內日文樣本全部加密，經使用者決定暫緩。
 
 ## 遊戲庫盤點（I5 引擎）
 
@@ -12,7 +12,7 @@
 | Artemis | 6（另有 Steam 版 NUKITASHI 1、2） | 0 款：NUKITASHI、AMANATSU、SlowLife（兩份）劇本內建 cn／tw；Fuyu Kiss CHS 已是中文；アイコトバ 有中文補丁 `.pfs.001`。實測改用 アイコトバ 不含補丁的日文原版 |
 | CatSystem2 | 5 | 0 款可用：New WG、NEKOPARA Vol.3、人類最強 2／3 的 `scene.int` 都是加密 KIF（Blowfish，金鑰在 exe 資源，封包含 `__key__.dat`）；唯一未加密的人類最強 1 CHS 是漢化組重新打包的中文版。依 §1.3 不解密，經使用者決定 CatSystem2 暫緩 |
 | Wolf RPG | 5 | 0 款：4 款的資料在加密 `.wolf` 內（不解密，不支援）；Brave Alchemist Colette 已漢化。唯一的散檔遊戲 妹！せいかつ〜ファンタジー〜 已被他人以 GBK 部分漢化（約 8,300 句），實測只翻剩下的日文 |
-| SRPG Studio | 1 | 待查 |
+| SRPG Studio | 1 | 0 款可用：唯一的 01311108 `data.dts` 加密旗標為 1，專案資料（全部遊戲文字）以 RC4 加密（引擎預設密碼的 MD5，部分遊戲另藏金鑰）。依 §1.3 不解密，經使用者決定暫緩 |
 
 ## 修改檔案
 
