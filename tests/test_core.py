@@ -22,6 +22,25 @@ class CoreApi(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
 
+    def test_batch_runs_each_game_and_reports_failures(self):
+        other, _ = copy_game("mv_min")
+        before = snapshot(other)
+        missing = self.home.parent / "no-such-game"
+        seen = []
+        results = core.batch([self.game, missing, other], IdsFake, self.home, apply=True, progress=seen.append)
+        self.assertEqual([r["status"] for r in results], ["ok", "error", "ok"])
+        self.assertTrue(all(r["translated"] > 0 and r["files"] > 0 for r in (results[0], results[2])))
+        self.assertNotEqual(snapshot(other), before)                       # extracted, translated and written back
+        self.assertEqual({s["index"] for s in seen}, {0, 2})
+        self.assertEqual(core.batch([self.game], IdsFake, self.home)[0]["translated"], 0)   # nothing left to do
+
+    def test_batch_stops_when_the_user_must_act(self):
+        from yakupatch.backends import UsageLimit
+        other, _ = copy_game("mv_min")
+        quota = lambda: IdsFake(lambda texts, n: (_ for _ in ()).throw(UsageLimit("quota")))
+        results = core.batch([self.game, other], quota, self.home)
+        self.assertEqual([r["status"] for r in results], ["paused"])        # the second game is not started
+
     def coded(self):
         return next(r for r in self.store.records.values()
                     if r["status"] == "pending" and core.masked(r, self.plugin)[2])

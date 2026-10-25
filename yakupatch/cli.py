@@ -37,10 +37,14 @@ def main(argv=None) -> int:
                         ("export", "匯出分批檔"), ("import", "匯入譯文（分批檔或分享檔）"),
                         ("share", "匯出譯文分享檔（不含遊戲原文）"), ("apply", "寫回遊戲"),
                         ("restore", "還原遊戲"), ("undo", "撤銷一次翻譯或匯入"), ("translate", "翻譯（Sakura／Codex／OpenAI 相容）"),
-                        ("diagnose", "匯出診斷包（不含遊戲文本）")]:
+                        ("batch", "批次處理多個遊戲：提取→翻譯→（寫回）"), ("diagnose", "匯出診斷包（不含遊戲文本）")]:
         p = sub.add_parser(name, help=help_)
-        p.add_argument("game", type=Path)
-        if name == "translate":
+        if name == "batch":
+            p.add_argument("games", nargs="+", type=Path)
+            p.add_argument("--apply", action="store_true", help="翻譯後直接寫回（原檔先備份）")
+        else:
+            p.add_argument("game", type=Path)
+        if name in ("translate", "batch"):
             p.add_argument("--backend", choices=["sakura", "codex", "openai"], default="sakura",
                            help="翻譯後端（Codex 為實驗性；openai＝任意 OpenAI 相容 API）")
             p.add_argument("--limit", type=int, help="只翻前 N 筆（名稱／系統優先）")
@@ -61,7 +65,7 @@ def main(argv=None) -> int:
             p.add_argument("--effort", default="low", help="Codex 推理等級")
             p.add_argument("--script", choices=["zh-Hant", "zh-Hans"], default="zh-Hant", help="Codex／OpenAI 相容輸出字體（不做轉換）")
             p.add_argument("--yes", action="store_true", help="計費後端不詢問用量預估直接開始")
-            translate_parser = p
+            translate_parsers = translate_parsers + [p] if name == "batch" else [p]
         if name == "extract":
             p.add_argument("--force", action="store_true", help="遊戲已是中文仍要提取")
         if name == "import":
@@ -79,14 +83,15 @@ def main(argv=None) -> int:
     p = sub.add_parser("openai", help="OpenAI 相容 API 的金鑰與模型（位址在設定的 openai 區段）")
     p.add_argument("action", choices=["key", "clear", "models"])
     args = ap.parse_args(argv)
-    if args.cmd == "translate" and args.backend == "sakura":   # only Sakura reads config.json, so a bad file never blocks restore
+    translate_parser = translate_parsers[args.cmd == "batch"] if args.cmd in ("translate", "batch") else None
+    if args.cmd in ("translate", "batch") and args.backend == "sakura":   # only Sakura reads config.json, so a bad file never blocks restore
         try:
             translate_parser.set_defaults(**_sakura_defaults(projects_home().parent / "config.json"))
         except ValueError as ex:
             print(f"錯誤：{ex}")
             return 1
         args = ap.parse_args(argv)                       # command line still wins over config.json
-    elif args.cmd == "translate" and args.backend == "openai":
+    elif args.cmd in ("translate", "batch") and args.backend == "openai":
         try:
             cfg = core.openai_config() if "openai" in core.load_config() else None   # else --api-base must be given
         except (TypeError, ValueError) as ex:
@@ -97,7 +102,7 @@ def main(argv=None) -> int:
                                           timeout=cfg.timeout, retries=cfg.retries, script=cfg.output_script,
                                           temperature=cfg.temperature, max_tokens=cfg.max_tokens)
             args = ap.parse_args(argv)
-    elif args.cmd == "translate":                        # codex section is shared with the GUI settings
+    elif args.cmd in ("translate", "batch"):             # codex section is shared with the GUI settings
         try:
             cfg = core.codex_config()
         except (TypeError, ValueError) as ex:
@@ -107,7 +112,8 @@ def main(argv=None) -> int:
                                       retries=cfg.retries, script=cfg.output_script)
         args = ap.parse_args(argv)
     try:
-        return _codex(args) if args.cmd == "codex" else _openai(args) if args.cmd == "openai" else _run(args)
+        return (_codex(args) if args.cmd == "codex" else _openai(args) if args.cmd == "openai"
+                else _batch(args) if args.cmd == "batch" else _run(args))
     except KeyboardInterrupt:
         print("已中斷；已完成批次已保存，重跑 translate 即可續跑。")
         return 130
@@ -170,6 +176,34 @@ def _openai(args) -> int:
         for model in OpenAICompat(cfg).list_models():
             print(model)
     return 0
+
+
+def _batch(args) -> int:
+    if args.dry_run:
+        print("batch 不支援 --dry-run，請對單一遊戲用 translate --dry-run 預估。")
+        return 1
+    if _backend(args).caps.metered and not args.yes:
+        print("計費後端批次翻譯不會逐款詢問用量，請確認後加 --yes。")
+        return 1
+    last = [None]
+
+    def show(s):
+        if s["game"] != last[0]:
+            last[0] = s["game"]
+            print(f"[{s['index'] + 1}/{s['of']}] {s['game']}", flush=True)
+        print(f"  已翻 {s['translated']}、失敗 {s['failed']}", flush=True)
+
+    results = core.batch(args.games, lambda: _backend(args), args.home, apply=args.apply, limit=args.limit,
+                          progress=show)
+    labels = {"ok": "完成", "skip": "不需翻譯（已是中文）", "stopped": "已中斷", "paused": "暫停", "error": "失敗"}
+    print("批次結果：")
+    for r in results:
+        files = f"，寫回 {r['files']} 個檔案" if args.apply and r["status"] == "ok" else ""
+        print(f"  {labels[r['status']]}：{r['game']}（已翻 {r['translated']}、失敗 {r['failed']}{files}）"
+              + (f" {r['error']}" if r["error"] else ""))
+    if len(results) < len(args.games):
+        print(f"  未處理 {len(args.games) - len(results)} 款（請先解決上面的問題再重跑）")
+    return 0 if all(r["status"] in ("ok", "skip") for r in results) and len(results) == len(args.games) else 1
 
 
 def _codex(args) -> int:

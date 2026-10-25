@@ -106,6 +106,7 @@ class MainWindow(QMainWindow):
         self.lib_filter.addItems([tr(s) for s in ("全部", "未處理", "翻譯中", "已提取", "已寫回", "不需翻譯", "不支援")])
         self.lib_filter.currentIndexChanged.connect(self.refresh_library)
         self.lib_list = QListWidget()
+        self.lib_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.lib_list.currentItemChanged.connect(lambda item, _: item and self.select_game(item.data(Qt.UserRole)))
         self.lib_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.lib_list.customContextMenuRequested.connect(self._library_menu)
@@ -363,7 +364,7 @@ class MainWindow(QMainWindow):
             parts = []
             for j in live:
                 p = j.progress
-                parts.append(f"{j.label} " + (tr("排隊中") if j.state == "queued" else
+                parts.append(f"{j.label} " + (f"{p['index'] + 1}/{p['of']} · " if "of" in p else "") + (tr("排隊中") if j.state == "queued" else
                                               f"{p.get('translated', 0) + p.get('failed', 0)}/{p.get('total', '?')}"
                                               + (f" · {tr('失敗')} {p['failed']}" if p.get("failed") else "")
                                               if p else tr("進行中")))
@@ -438,7 +439,59 @@ class MainWindow(QMainWindow):
         menu.addAction(tr("重新偵測"), lambda: self.run_bg(lambda job: self.lib.redetect(key), self._library_done_quiet,
                                                        tr("重新偵測")))
         menu.addAction(tr("移除（只移除專案，不刪遊戲）"), lambda: self.remove_game(key))
+        menu.addSeparator()
+        menu.addAction(tr("批次翻譯選取的遊戲（{} 款）").format(len(self.lib_list.selectedItems()) or 1),
+                       self.batch_translate)
         menu.exec(self.lib_list.mapToGlobal(pos))
+
+    def batch_translate(self):
+        """F16: extract → translate → optionally apply each selected game, in one queued job."""
+        keys = [i.data(Qt.UserRole) for i in self.lib_list.selectedItems()] or [self.lib_list.currentItem().data(Qt.UserRole)]
+        try:
+            backend, name = self.make_backend()
+            opened = {}
+            for key in keys:
+                try:
+                    opened[key] = self._open_game(key)
+                except (OSError, ValueError):     # unsupported games are reported in the batch result instead
+                    pass
+        except (TypeError, ValueError) as ex:
+            QMessageBox.warning(self, "YakuPatch", tr("設定有誤：{}").format(ex))
+            return
+        if name == "codex" and not core.load_config().get("codex", {}).get("privacy_ack"):
+            if QMessageBox.question(self, "YakuPatch", tr("Codex 是實驗性後端（非公開端點）。翻譯時遊戲文本會送到 OpenAI。"
+                                                          "\n確定要使用嗎？")) != QMessageBox.Yes:
+                return
+            core.save_config("codex", {**core.load_config().get("codex", {}), "privacy_ack": True})
+        msg = tr("用 {} 依序翻譯 {} 款遊戲（尚未提取的會先提取，已是中文的會略過）。").format(
+            self.backend_combo.currentText(), len(keys))
+        if backend.caps.metered:
+            msg += "\n" + tr("這是計費後端，批次不會逐款顯示用量預估。")
+        box = QMessageBox(QMessageBox.Question, tr("批次翻譯"), msg + "\n\n" + tr("翻譯完成後要直接寫回遊戲嗎？（原檔會先備份）"))
+        apply_btn = box.addButton(tr("翻譯並寫回"), QMessageBox.AcceptRole)
+        only_btn = box.addButton(tr("只翻譯"), QMessageBox.AcceptRole)
+        box.addButton(QMessageBox.Cancel)
+        box.exec()
+        if box.clickedButton() not in (apply_btn, only_btn):
+            return
+        apply = box.clickedButton() is apply_btn
+
+        def work(job):
+            return core.batch(keys, lambda: self.make_backend(name)[0], self.home, apply=apply, progress=job.report,
+                              stop=job.stop, opener=lambda key: opened.get(key) or core.open_game(Path(key), self.home))
+
+        self.run_bg(work, self._batch_done, tr("批次翻譯 {} 款").format(len(keys)), key=name)
+
+    def _batch_done(self, job):
+        self.refresh_library()
+        if self.key:
+            self._refresh_counts()
+        if self._error(job, tr("批次翻譯失敗")):
+            return
+        labels = {"ok": "完成", "skip": "不需翻譯", "stopped": "已中斷", "paused": "暫停", "error": "失敗"}
+        lines = [tr("{}：{}（已翻 {}、失敗 {}）{}").format(tr(labels[r["status"]]), Path(r["game"]).name, r["translated"],
+                                                     r["failed"], r["error"]) for r in job.result]
+        QMessageBox.information(self, tr("批次翻譯"), "\n".join(lines) or tr("沒有處理任何遊戲"))
 
     def _library_done_quiet(self, job):
         self._error(job, tr("偵測失敗"))
@@ -453,14 +506,18 @@ class MainWindow(QMainWindow):
             self.tabs.setEnabled(False)
         self.refresh_library()
 
+    def _open_game(self, key):
+        if key not in self.games:
+            game, plugin, store = core.open_game(Path(key), self.home)
+            store.listeners.append(lambda ids, k=key: self.bridge.store_changed.emit(k, ids))
+            self.games[key] = (game, plugin, store)
+        return self.games[key]
+
     def select_game(self, key):
         if key == self.key:
             return
         try:
-            if key not in self.games:
-                game, plugin, store = core.open_game(Path(key), self.home)
-                store.listeners.append(lambda ids, k=key: self.bridge.store_changed.emit(k, ids))
-                self.games[key] = (game, plugin, store)
+            self._open_game(key)
         except (OSError, ValueError) as ex:
             QMessageBox.warning(self, "YakuPatch", str(ex))
             return
@@ -731,8 +788,8 @@ class MainWindow(QMainWindow):
         self.load_glossary()
 
     # ---------- translate tab ----------
-    def make_backend(self):
-        name = self.backend_combo.currentData()
+    def make_backend(self, name=None):
+        name = name or self.backend_combo.currentData()     # batch workers pass the name: no widget reads off-thread
         if name == "openai":
             return OpenAICompat(core.openai_config()), name
         return (Codex(core.codex_config()) if name == "codex" else Sakura(core.sakura_config())), name
