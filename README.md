@@ -5,7 +5,7 @@ YakuPatch 把日文遊戲翻譯成中文。它直接修改遊戲的文字檔，�
 目前支援 RPG Maker MV／MZ、TyranoScript（含 `app.asar`）、Ren'Py（含 `.rpa`）、KiriKiri（未加密 `.xp3`）、Unity（Mono；UI、Utage、Naninovel、自訂類別、`Assembly-CSharp.dll` 字串）、Godot（`.pck` 內的文字場景與 Godot 3 腳本）、Artemis（`.pfs`）與 Wolf RPG（未加密散檔），翻譯後端有 Sakura（本地模型）與 Codex（實驗性）。
 
 > [!NOTE]
-> 專案仍在開發中。I1（MV/MZ、Sakura、命令列）與 I2（圖形介面、Codex）已完成；I3（全文 QA、外部字典、自動換行、Tyrano、Ren'Py）已完成；I4（KiriKiri、Unity）已完成；I5（Godot、Artemis、Wolf RPG）已完成，CatSystem2、SRPG Studio 因樣本加密暫緩。設計見 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
+> 專案仍在開發中。I1（MV/MZ、Sakura、命令列）與 I2（圖形介面、Codex）已完成；I3（全文 QA、外部字典、自動換行、Tyrano、Ren'Py）已完成；I4（KiriKiri、Unity）已完成；I5（Godot、Artemis、Wolf RPG）已完成，CatSystem2、SRPG Studio 因樣本加密暫緩；I6（免安裝壓縮包、安裝腳本、自動建置）已實作，v1.0.0。設計見 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
 
 ## 功能
 
@@ -21,11 +21,24 @@ YakuPatch 把日文遊戲翻譯成中文。它直接修改遊戲的文字檔，�
 
 ## 需求
 
-- Python 3.11 以上
+- Windows 10／11 64 位元（免安裝版與安裝腳本）；從原始碼執行需 Python 3.11 以上
 - 使用 Sakura 時：自行啟動、與 OpenAI 相容的 llama-server
 - 使用 Codex 時：有 Codex 額度的 ChatGPT 帳號
 
 ## 安裝
+
+兩種方式結果相同：資料夾內自帶 Python 與全部套件，不寫登錄檔、不動系統 Python。專案、設定與字典放在 `%USERPROFILE%\.yakupatch`，更新或刪除程式資料夾不影響。
+
+- **免安裝壓縮包**（建議）：從 [GitHub Releases](https://github.com/Honguan/YakuPatch/releases) 下載 `YakuPatch_win.zip`，解壓後雙擊 `launch_win.bat`。
+- **安裝腳本**：在要安裝的資料夾開 PowerShell 執行下面這行，會建立 `YakuPatch` 資料夾並自動啟動：
+
+  ```powershell
+  irm https://raw.githubusercontent.com/Honguan/YakuPatch/main/scripts/install.ps1 | iex
+  ```
+
+`launch_win.bat` 每次啟動會先檢查套件，缺少或版本不符時可按 Y 一鍵補裝；缺少 Microsoft Visual C++ 可轉散發套件時會顯示下載網址。命令列用同一份 Python：`yakupatch.bat extract <遊戲資料夾>`。更新時下載新版壓縮包覆蓋程式資料夾，或重新執行安裝腳本；圖形介面啟動時若 GitHub 有新版，狀態列會顯示下載連結（不會自動下載）。
+
+從原始碼執行：
 
 ```bash
 pip install -e .
