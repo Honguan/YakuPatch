@@ -14,6 +14,8 @@ from .fsutil import atomic_write, sha256
 
 FORMAT = "yakupatch-strings/1"
 _PATHLIKE = re.compile(r"^[\w\-./\\]+\.(png|jpe?g|ogg|m4a|wav|json|js|txt|webm|efkefc)$", re.I)
+# Script text that plugins read as settings: // comments and `key: value,` lines.
+_CODE_LINE = re.compile(r"^\s*(?://.*|[A-Za-z_][A-Za-z0-9_]*\s*:\s*\S.*,)\s*$")
 
 
 class LanguageGateStop(Exception):
@@ -122,7 +124,7 @@ def classify(u: Unit) -> tuple[str, list[str]]:
         return "skip", []
     if langdetect.sentence_is_chinese(core):
         return "skip", ["already_zh"]
-    if u.kind == "other":
+    if u.kind == "other" or all(_CODE_LINE.match(line) for line in core.split("\n") if line.strip()):
         return "pending", ["uncertain"]
     return "pending", []
 

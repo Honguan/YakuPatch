@@ -5,7 +5,7 @@ from yakupatch import engines, exchange, translate, writeback
 from yakupatch.backup import BACKUP_DIR, Backup
 from yakupatch.encoding import decode, encode
 from yakupatch.exchange import Store
-from yakupatch.extract import LanguageGateStop, extract, project_dir
+from yakupatch.extract import LanguageGateStop, Unit, classify, extract, project_dir
 from yakupatch.fsutil import sha256
 from yakupatch.jsonspan import replace_strings, string_spans
 from yakupatch.langdetect import probe, sentence_is_chinese
@@ -64,6 +64,27 @@ class Units(unittest.TestCase):
         self.assertIn("length_ratio", translate.validate("コンティニュー", "继续" * 12, {}))
         alt, alt_masks = translate.mask("\\ct<1>番目", MZ.control_codes)
         self.assertEqual(alt, "⟦0⟧<1>番目")      # literal <1> in source switches placeholder style
+        args, args_masks = translate.mask("%1の%2を %3 奪った！", MZ.control_codes)
+        self.assertEqual(args, "<0>の<1>を <2> 奪った！")
+        self.assertIn("placeholders", translate.validate(args, "<0>夺走了<1>！", args_masks))
+        art, _ = translate.mask("[num]のデータを削除します。", engines.Artemis.control_codes)
+        self.assertEqual(art, "<0>のデータを削除します。")
+
+    def test_copied_kana_line_or_tag(self):
+        self.assertIn("kana_residue", translate.validate("おじさん\n「やった！」", "おじさん\n「太好了！」", {}))
+        self.assertIn("kana_residue", translate.validate("<0><おじさん>「おや」", "<0><おじさん>「哎呀」", {"<0>": "\\N"}))
+        self.assertEqual(translate.validate("ひより\n「はい」", "日和\n「是」", {}), [])
+        self.assertEqual(translate.validate("っ……\n「はい」", "っ……\n「是」", {}), [])     # one kana is not a copied line
+        self.assertEqual(translate.validate("回想を見ますか？\nCG担当：もりの", "要看回想吗？\nCG担当：もりの", {}), [])
+
+    def test_ruby_reading_dropped_and_code_text_uncertain(self):
+        unity = engines.Unity()
+        self.assertEqual(unity.fit("dialogue", '弄湿了<ruby="リラ">妹妹</ruby>的'), "弄湿了妹妹的")
+        self.assertEqual(unity.fit("dialogue", '<ruby="Lila">妹</ruby>'), '<ruby="Lila">妹</ruby>')
+        code = Unit("a", ["0"], "dialogue", ["//床装飾を塗る[0~1.0]", "floorPaintRate:0.4,", "", "//水場"], None)
+        self.assertEqual(classify(code), ("pending", ["uncertain"]))
+        self.assertEqual(classify(Unit("a", ["0"], "dialogue", ["//眠そうに"], None)), ("pending", ["uncertain"]))
+        self.assertEqual(classify(Unit("a", ["0"], "dialogue", ["HP:回復した、", "よかった"], None)), ("pending", []))
 
     def test_language(self):
         self.assertFalse(sentence_is_chinese("魔法陣"))

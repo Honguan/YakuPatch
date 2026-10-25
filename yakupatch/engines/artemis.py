@@ -45,6 +45,7 @@ class Artemis(EnginePlugin):
     name = "artemis"
     version = "1.0.0"
     default_encoding = "utf-8"
+    control_codes = [r"\[[A-Za-z_]\w*\]"]          # [num]: a value the game fills in
 
     def _archives(self, game_dir: Path) -> list[str]:
         """Archives in mount order, without the one we wrote ourselves."""

@@ -18,6 +18,7 @@ from .base import EnginePlugin, Segment
 
 _JA = re.compile(r"[぀-ヿ]")
 _CJK = re.compile(r"[一-鿿]")
+_RUBY = re.compile(r'<ruby="[^"<>]*[぀-ヿ][^"<>]*">(.*?)</ruby>', re.S)
 _UI = {"TextMeshProUGUI": "m_text", "TextMeshPro": "m_text", "Text": "m_Text"}
 # Utage sheet columns shown to the player; others are labels, file names or the unused English copy.
 _COLUMNS = {"Text": None, "NameText": "name", "Japanese": "ui", "Title": "ui"}
@@ -319,6 +320,10 @@ class Unity(EnginePlugin):
 
     def render(self, rel: str, text: str, repl: dict[str, str]) -> str:
         raise NotImplementedError("Unity 以 outputs() 重寫整個資產檔")
+
+    def fit(self, kind: str, text: str) -> str:
+        # A kana reading over translated Chinese is wrong, so keep only the ruby base text.
+        return _RUBY.sub(r"\1", text)
 
     def _apply(self, game_dir: Path, rel: str, raw: bytes, repl: dict[str, str]) -> bytes:
         if rel.endswith(".dll"):
