@@ -32,7 +32,7 @@ class FakeServer:
             raise HTTPError(request.full_url, 400, "Bad Request", {}, io.BytesIO(b'{"error":"response_format unsupported"}'))
         if self.reply:
             return io.BytesIO(json.dumps(self.reply).encode())
-        items = json.loads(body["messages"][-1]["content"])["items"]
+        items = json.loads(body["messages"][-1]["content"]).get("items", [{"id": "0", "text": "要約"}])  # F14 summary call
         content = json.dumps({"translations": [{"id": i["id"], "translation": fake_translate(i["text"])} for i in items]})
         return io.BytesIO(json.dumps({"choices": [{"finish_reason": "stop", "message": {
             "content": "<think>…</think>```json\n" + content + "\n```"}}]}).encode())
@@ -134,6 +134,40 @@ class OpenAICompatTests(unittest.TestCase):
         self.assertGreater(result["translated"], 0)
         record = next(r for r in store.records.values() if r["status"] == "translated")
         self.assertEqual(record["by"], "openai:m-o1")
+
+
+    def test_scene_summary_carries_into_later_waves(self):
+        game, home = copy_game("mz_min")
+        plugin = engines.PLUGINS[0]
+        store = Store(project_dir(game, plugin, home))
+        extract(game, plugin, store)
+        server = FakeServer()
+        result = pipeline.run(store, plugin.control_codes, backend(server, model="m", max_items=2, parallel=1),
+                              sleep=lambda _: None)
+        self.assertEqual(result["failed"], 0)
+        bodies = [json.loads(b["messages"][-1]["content"]) for _, _, b in server.requests if b]
+        asks = [b for b in bodies if "lines" in b]
+        self.assertTrue(asks)                                        # summaries were requested after waves
+        self.assertTrue(any(b.get("summary") for b in bodies if "items" in b))
+        self.assertTrue(all("summary" not in b for b in bodies[:1]))  # nothing to summarize before the first wave
+        self.assertIn(fake_translate("要約"), json.loads((store.dir / "summary.json").read_text("utf-8")).values())
+
+    def test_failed_summary_never_blocks_translation(self):
+        game, home = copy_game("mz_min")
+        plugin = engines.PLUGINS[0]
+        store = Store(project_dir(game, plugin, home))
+        extract(game, plugin, store)
+        server = FakeServer()
+        original = server.__call__
+
+        def broken(request, timeout=None):
+            if request.data and "lines" in json.loads(json.loads(request.data)["messages"][-1]["content"]):
+                return io.BytesIO(json.dumps({"choices": [{"finish_reason": "stop", "message": {"content": "no"}}]}).encode())
+            return original(request, timeout)
+        result = pipeline.run(store, plugin.control_codes, backend(broken, model="m", max_items=2, parallel=1),
+                              sleep=lambda _: None)
+        self.assertEqual(result["failed"], 0)
+        self.assertGreater(result["translated"], 0)
 
 
 if __name__ == "__main__":
