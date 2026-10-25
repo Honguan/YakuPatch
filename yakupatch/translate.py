@@ -10,6 +10,7 @@ _REPEAT = re.compile(r"(.{1,20}?)\1{3,}", re.S)
 _KATAKANA = re.compile(r"[ァ-ヺー]")
 _KANA_ONLY = re.compile(r"[ぁ-ゖァ-ヺ]")                     # without ・ and ー, which also mark Chinese text
 _KANA_TAG = re.compile(r"<[^<>\n]*[ぁ-ゖァ-ヺ][^<>\n]*>")
+_SMALL_KANA = str.maketrans("ぁぃぅぇぉゃゅょゎァィゥェォャュョヮ", "あいうえおやゆよわアイウエオヤユヨワ")
 
 
 def normalize(text: str) -> tuple[str, tuple[str, str]]:
@@ -72,7 +73,8 @@ def validate(src: str, dst: str, masks: dict[str, str], repeat_threshold: int = 
     if copied or len(plain_dst) >= 4 and len(KANA.findall(plain_dst)) / len(plain_dst) > 0.3:
         errors.append("kana_residue")
     repeat = _REPEAT if repeat_threshold == 4 else re.compile(r"(.{1,20}?)\1{" + str(repeat_threshold - 1) + r",}", re.S)
-    if repeat.search(dst) and not repeat.search(src):
+    # ああ…ぁぁぁ is one long moan; with small kana folded the source repeats as much as 啊啊啊… does.
+    if repeat.search(dst) and not repeat.search(src.translate(_SMALL_KANA)):
         errors.append("repetition")
     if _EXTRA.search(dst) and not _EXTRA.search(src):
         errors.append("extra_text")
