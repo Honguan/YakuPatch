@@ -50,7 +50,7 @@
 ## 2. 現況調查
 
 ### 2.1 使用者遊戲庫引擎分布
-以檔案特徵掃描 `D:\Games\TEMP` 與 `G:\game` 共 **365** 個遊戲資料夾（深度 4 層，屬於估計）：
+以檔案特徵掃描使用者遊戲庫共 **365** 個遊戲資料夾（深度 4 層，屬於估計）：
 
 | 引擎 | 數量 | 文本位置（典型） | 難度 |
 |---|---:|---|---|
@@ -79,10 +79,9 @@
 ### 2.3 參考工具
 | 工具 | 授權 | 參考內容 |
 |---|---|---|
-| MTool（`G:\game\MTool`） | 閉源 | 只參考行為：依引擎分 loader、譯文表格編輯、匯出入流程；不反編譯 |
-| LunaTranslator（`D:\AI\LunaTranslator`） | GPL-3.0 | `translator/sakura_base.py` 的 Sakura 提示詞與術語表格式 |
-| BallonsTranslator（`D:\AI\Ballonstranslator_win_minium`） | GPL-3.0 | `modules/codex.py`：ChatGPT OAuth 登入、token 存系統憑證庫、Responses 串流、錯誤分類；`llm_translation_contract.py`：以 JSON Schema + id 對應譯文 |
-| OneClickLLAMA | — | `01_2K_NP8.bat` 啟動 `llama-server`：8 個平行槽、每槽 2048 context、Sakura 7B、埠 8080 |
+| MTool | 閉源 | 只參考行為：依引擎分 loader、譯文表格編輯、匯出入流程；不反編譯 |
+| LunaTranslator | GPL-3.0 | `translator/sakura_base.py` 的 Sakura 提示詞與術語表格式 |
+| BallonsTranslator | GPL-3.0 | `modules/codex.py`：ChatGPT OAuth 登入、token 存系統憑證庫、Responses 串流、錯誤分類；`llm_translation_contract.py`：以 JSON Schema + id 對應譯文 |
 
 ---
 
@@ -671,7 +670,7 @@ class BackendCaps:
 ### 11.3 遊戲庫
 | 項目 | 設計 |
 |---|---|
-| 加入 | 「加入遊戲」選單一資料夾；「掃描資料夾」選上層資料夾（例如 `G:\game`），自動找出所有遊戲並批次偵測 |
+| 加入 | 「加入遊戲」選單一資料夾；「掃描資料夾」選上層資料夾（例如 `D:\Games`），自動找出所有遊戲並批次偵測 |
 | 每列顯示 | 名稱、引擎、語言標籤、狀態、進度 |
 | 語言標籤 | `日文`、`簡中`、`繁中`、`中文`（無法分辨繁簡）、`混合`、`中文包`（內建中文語言包）、`未知` |
 | 不需翻譯 | 判定為中文或有中文包的遊戲以灰色顯示「不需翻譯」，排在清單後面；滑鼠移上去顯示判定依據 |
@@ -975,7 +974,7 @@ v0.3 審查時找到的缺口。「已定案」表示設計已寫進本企劃；
 
 | 日期 | 決定 |
 |---|---|
-| 2026-10-25 | 本地 Sakura 改為內建下載與啟動，取代指定 OneClickLLAMA 資料夾；llama.cpp 掃描最近 10 個 release 取第一個有 Windows 執行檔的版本；推薦＝模型大小加 1.5／2.5 GiB 餘裕能放進顯示卡，依目錄順序（品質優先）取第一個；Qwen3 系列標「非正式版／驗證版」 |
+| 2026-10-25 | 本地 Sakura 改為內建下載與啟動，取代指定外部啟動器資料夾；llama.cpp 掃描最近 10 個 release 取第一個有 Windows 執行檔的版本；推薦＝模型大小加 1.5／2.5 GiB 餘裕能放進顯示卡，依目錄順序（品質優先）取第一個；Qwen3 系列標「非正式版／驗證版」 |
 | 2026-10-25 | 場景摘要以「檔案」為場景單位，每波翻譯後各檔一次摘要呼叫；摘要沿用後端既有的 translations 回覆格式（id 0），不另加 schema；只用在對話句，Sakura 不使用；用量預估含摘要呼叫 |
 | 2026-10-25 | 譯文分享檔不含遊戲原文：每句只存 id、遮蔽後原文的 SHA-256 前 16 碼與譯文；匯入時 id 與雜湊都相符才套用，引擎不同直接拒絕，並走與分批檔相同的驗證與撤銷 |
 | 2026-10-25 | OpenAI 相容後端沿用 Codex 的 json_ids 提示詞與格式；API 金鑰依 API 位址存在系統認證管理員（或環境變數 `YAKUPATCH_API_KEY`），不寫入 config.json；非本機位址視為計費後端，翻譯前顯示用量預估 |
