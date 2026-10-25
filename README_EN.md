@@ -77,7 +77,7 @@
   * The first start can take a few dozen seconds. The console window shows progress dots and closes when the main window opens.
 
 * **Step 2: Set up a backend**
-  * Under Settings → 本地 Sakura (Local Sakura), download the recommended model and llama.cpp, then click 啟動伺服器 (Start server) (or start your own llama-server, enter its address in Settings and click 測試連線 (Test connection)); or sign in to Codex in Settings; or enter an API address, key and model under Settings → OpenAI 相容 (OpenAI-compatible).
+  * Recommended: under Settings → 本地 Sakura (Local Sakura), download the recommended model and llama.cpp, then click 啟動伺服器 (Start server) (or start your own llama-server, enter its address in Settings and click 測試連線 (Test connection)); or sign in to Codex in Settings; or enter an API address, key and model under Settings → OpenAI 相容 (OpenAI-compatible).
 
 * **Step 3: Add a game and translate**
   * Add the game folder to the library on the left and follow the step bar at the top: Detect → Language check → Extract → Translate → Apply.

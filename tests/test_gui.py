@@ -207,6 +207,14 @@ class Gui(unittest.TestCase):
         self.assertEqual(dlg.dict_table.rowCount(), len(dicts.SOURCES))
         self.assertEqual(dlg.dict_table.item(0, 2).text(), "查詢後建立")
 
+    def test_settings_open_local_sakura_until_sakura_is_set_up(self):
+        from PySide6.QtWidgets import QTabWidget
+        from yakupatch.gui.settings import SettingsDialog
+        with patch.object(SettingsDialog, "_account", return_value=""):
+            self.assertEqual(SettingsDialog(self.win).findChild(QTabWidget).currentIndex(), 1)
+            core.save_config("sakura", {})
+            self.assertEqual(SettingsDialog(self.win).findChild(QTabWidget).currentIndex(), 0)
+
     def test_settings_openai_tab_saves_without_key_in_config(self):
         from yakupatch.backends import openai_compat
         from yakupatch.gui.settings import SettingsDialog

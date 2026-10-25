@@ -21,7 +21,7 @@ SAKURA_LABELS = {"api_base": "API 位址", "version": "提示詞版本", "model"
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, window, tab=0):
+    def __init__(self, window, tab=None):
         super().__init__(window)
         self.window_ = window
         self.setWindowTitle(tr("設定"))
@@ -33,11 +33,13 @@ class SettingsDialog(QDialog):
             self.config = {}
         tabs = QTabWidget()
         tabs.addTab(self._sakura(), tr("Sakura"))
-        tabs.addTab(self._local(), tr("本地 Sakura"))
+        tabs.addTab(self._local(), tr("本地 Sakura（推薦）"))
         tabs.addTab(self._codex(), tr("Codex（實驗性）"))
         tabs.addTab(self._openai(), tr("OpenAI 相容"))
         tabs.addTab(self._advanced(), tr("進階"))
         tabs.addTab(self._dicts(), tr("字典"))
+        if tab is None:                                   # until Sakura is set up, open the recommended local tab
+            tab = 0 if "sakura" in self.config else 1
         tabs.setCurrentIndex(tab)
         box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Close)
         box.accepted.connect(self.save)
@@ -52,6 +54,8 @@ class SettingsDialog(QDialog):
         form = QFormLayout(w)
         saved = self.config.get("sakura", {})
         self.sakura = {}
+        form.addRow(QLabel(tr("推薦在「本地 Sakura」分頁下載模型並啟動伺服器，位址會自動填好；"
+                              "只有連到自行架設或其他電腦的伺服器時才需要改這裡。"), wordWrap=True))
         for f in fields(SakuraConfig):
             value = saved.get(f.name, f.default)
             if f.name == "version":

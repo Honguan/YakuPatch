@@ -266,7 +266,7 @@ class MainWindow(QMainWindow):
         v.addLayout(row)
         row = QHBoxLayout()
         for text, slot in ((tr("查字典"), self.gloss_lookup), (tr("VNDB 角色名單"), self.gloss_vndb),
-                           (tr("Wikidata 查譯名"), self.gloss_wikidata), (tr("字典設定"), lambda: self.open_settings(3))):
+                           (tr("Wikidata 查譯名"), self.gloss_wikidata), (tr("字典設定"), lambda: self.open_settings(5))):
             row.addWidget(QPushButton(text, clicked=slot))
         v.addLayout(row)
         v.addWidget(QLabel(tr("字典譯名只是候選（來源 dict:…），勾選「已確認」後才會要求翻譯使用。")))
@@ -953,7 +953,7 @@ class MainWindow(QMainWindow):
             self.fix = self.resume_job
         else:
             self.action_button.setText(tr("開啟設定（測試連線）"))
-            self.fix = lambda: self.open_settings(tab={"sakura": 0, "codex": 2, "openai": 3}[name])
+            self.fix = lambda: self.open_settings(tab={"sakura": 1, "codex": 2, "openai": 3}[name])
         self.action_box.show()
 
     def _translation_buttons(self):
@@ -1116,7 +1116,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "YakuPatch", str(ex))
 
     # ---------- settings ----------
-    def open_settings(self, tab=0):
+    def open_settings(self, tab=None):
         dialog = SettingsDialog(self, tab)
         dialog.exec()
         self._backend_note()
