@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QComboBox, QFile
 from .. import core
 from ..backends import AuthRequired, ConfigError, UsageLimit
 from ..backends.codex import Codex
+from ..backends.openai_compat import OpenAICompat
 from ..backends.sakura import Sakura
 from ..cli import _LANG, _REASON
 from ..extract import LanguageGateStop
@@ -254,7 +255,7 @@ class MainWindow(QMainWindow):
         v.addLayout(row)
         v.addWidget(QLabel(tr("字典譯名只是候選（來源 dict:…），勾選「已確認」後才會要求翻譯使用。")))
         v.addWidget(QLabel(tr("翻譯進行中術語表為唯讀。")))
-        style = QGroupBox(tr("翻譯風格 style.md（人稱、敬語、語氣、專有名詞規則；只有 Codex 會使用）"))
+        style = QGroupBox(tr("翻譯風格 style.md（人稱、敬語、語氣、專有名詞規則；Codex 與 OpenAI 相容後端會使用）"))
         s = QVBoxLayout(style)
         self.style_edit = QPlainTextEdit(placeholderText=tr("例如：主角自稱「我」；女主角稱呼主角「哥哥」；語氣輕鬆。"))
         self.style_edit.setMaximumHeight(120)
@@ -271,6 +272,7 @@ class MainWindow(QMainWindow):
         self.backend_combo = QComboBox()
         self.backend_combo.addItem("Sakura", "sakura")
         self.backend_combo.addItem(tr("Codex（實驗性）"), "codex")
+        self.backend_combo.addItem(tr("OpenAI 相容"), "openai")
         self.backend_combo.currentIndexChanged.connect(self._backend_note)
         self.backend_status = QLabel()
         line.addWidget(self.backend_combo)
@@ -731,15 +733,19 @@ class MainWindow(QMainWindow):
     # ---------- translate tab ----------
     def make_backend(self):
         name = self.backend_combo.currentData()
+        if name == "openai":
+            return OpenAICompat(core.openai_config()), name
         return (Codex(core.codex_config()) if name == "codex" else Sakura(core.sakura_config())), name
 
     def _backend_note(self):
+        name = self.backend_combo.currentData()
         try:
-            script = core.codex_config().output_script
+            script = (core.openai_config() if name == "openai" else core.codex_config()).output_script
         except (TypeError, ValueError):
             script = "zh-Hant"
-        self.script_note.setText(tr("Sakura 固定輸出簡體（不做繁簡轉換）") if self.backend_combo.currentData() == "sakura"
-                                 else tr("Codex 輸出{}（可在設定修改）").format("繁體" if script == "zh-Hant" else "簡體"))
+        self.script_note.setText(tr("Sakura 固定輸出簡體（不做繁簡轉換）") if name == "sakura"
+                                 else tr("{} 輸出{}（可在設定修改）").format(self.backend_combo.currentText(),
+                                                                       "繁體" if script == "zh-Hant" else "簡體"))
         self.backend_status.setText(self.backend_info.get(self.backend_combo.currentData(), ""))
 
     def test_backend(self):
@@ -815,8 +821,8 @@ class MainWindow(QMainWindow):
             msg = tr("待翻 {} 句（{:,} 字），快取命中 {}，約 {} 批，預估 {} 秒。").format(
                 est["items"], est["characters"], est["cached"], est["batches"], est["seconds"])
             if backend.caps.metered:
-                msg += "\n" + tr("預估輸入約 {:,} token、輸出約 {:,} token（粗估），會使用你的 Codex 額度。").format(
-                    est["input_tokens"], est["output_tokens"])
+                msg += "\n" + tr("預估輸入約 {:,} token、輸出約 {:,} token（粗估），會使用你的{}額度。").format(
+                    est["input_tokens"], est["output_tokens"], tr(" Codex ") if name == "codex" else tr(" API "))
             if QMessageBox.question(self, tr("用量預估"), msg + "\n\n" + tr("開始翻譯？")) != QMessageBox.Yes:
                 return
             label = tr("翻譯 {}").format(game.parent.name if game.name.lower() == "www" else game.name)
@@ -867,12 +873,15 @@ class MainWindow(QMainWindow):
         if isinstance(job.error, AuthRequired) and name == "codex":
             self.action_button.setText(tr("重新登入"))
             self.fix = lambda: self.open_settings(tab=1)
+        elif isinstance(job.error, AuthRequired) and name == "openai":
+            self.action_button.setText(tr("開啟設定（API 金鑰）"))
+            self.fix = lambda: self.open_settings(tab=2)
         elif isinstance(job.error, UsageLimit):
             self.action_button.setText(tr("稍後繼續"))
             self.fix = self.resume_job
         else:
             self.action_button.setText(tr("開啟設定（測試連線）"))
-            self.fix = lambda: self.open_settings(tab=0 if name == "sakura" else 1)
+            self.fix = lambda: self.open_settings(tab={"sakura": 0, "codex": 1, "openai": 2}[name])
         self.action_box.show()
 
     def _translation_buttons(self):

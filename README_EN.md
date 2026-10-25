@@ -27,6 +27,7 @@
 * **Local or cloud**
   * 💻 **Sakura**: a local model on your own PC; no network, no cost.
   * ☁️ **Codex** (experimental): translates with the Codex quota of a ChatGPT account.
+  * 🔌 **OpenAI-compatible API**: DeepSeek, OpenAI, OpenRouter, Ollama, LM Studio and others; enter the address and key.
 
 ---
 
@@ -55,8 +56,8 @@
 | OS | Windows 10/11, 64-bit |
 | Python | **The portable zip and the install script bundle Python 3.12; you do not need to install Python.** Only running from source needs Python 3.11 or later |
 | Visual C++ Redistributable (x64) | Most PCs already have it. If it is missing, the launcher shows the [download link](https://aka.ms/vs/17/release/vc_redist.x64.exe) |
-| Translation backend (one of) | **Sakura**: a llama-server you start yourself (local or LAN)<br>**Codex** (experimental): a ChatGPT account with Codex quota |
-| Network | Needed for the install script, package repair, and Codex. Not needed to translate with a local Sakura server |
+| Translation backend (one of) | **Sakura**: a llama-server you start yourself (local or LAN)<br>**Codex** (experimental): a ChatGPT account with Codex quota<br>**OpenAI-compatible API**: an API address and key (a local server needs no key); pick a general chat model |
+| Network | Needed for the install script, package repair, Codex and cloud APIs. Not needed to translate with a local Sakura server |
 
 ---
 
@@ -73,7 +74,7 @@
   * The first start can take a few dozen seconds. The console window shows progress dots and closes when the main window opens.
 
 * **Step 2: Set up a backend**
-  * Start your Sakura llama-server, enter its address in Settings and click 測試連線 (Test connection); or sign in to Codex in Settings.
+  * Start your Sakura llama-server, enter its address in Settings and click 測試連線 (Test connection); or sign in to Codex in Settings; or enter an API address, key and model under Settings → OpenAI 相容 (OpenAI-compatible).
 
 * **Step 3: Add a game and translate**
   * Add the game folder to the library on the left and follow the step bar at the top: Detect → Language check → Extract → Translate → Apply.
@@ -125,7 +126,7 @@ Run the tests with `python -X utf8 -m unittest discover -s tests -t tests`. Desi
 </details>
 
 > [!WARNING]
-> Codex uses a non-public endpoint and may stop working at any time. Game text is sent to OpenAI when you translate with it.
+> Codex uses a non-public endpoint and may stop working at any time. Game text is sent to OpenAI when you translate with it. Cloud OpenAI-compatible APIs also receive the game text and bill by usage.
 
 ---
 

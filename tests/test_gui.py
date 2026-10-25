@@ -199,9 +199,27 @@ class Gui(unittest.TestCase):
         from yakupatch import dicts
         from yakupatch.gui.settings import SettingsDialog
         with patch.object(SettingsDialog, "_account", return_value=""):
-            dlg = SettingsDialog(self.win, 3)
+            dlg = SettingsDialog(self.win, 4)
         self.assertEqual(dlg.dict_table.rowCount(), len(dicts.SOURCES))
         self.assertEqual(dlg.dict_table.item(0, 2).text(), "查詢後建立")
+
+    def test_settings_openai_tab_saves_without_key_in_config(self):
+        from yakupatch.backends import openai_compat
+        from yakupatch.gui.settings import SettingsDialog
+        with patch.object(SettingsDialog, "_account", return_value=""):
+            SettingsDialog(self.win, 2).save()                        # untouched tab: other sections still save
+            self.assertNotIn("openai", core.load_config())
+            dlg = SettingsDialog(self.win, 2)
+        dlg.oa_base.setText("https://api.example.com/v1")
+        dlg.oa_model.setCurrentText("deepseek-chat")
+        dlg.oa_key.setText("sk-secret")
+        with patch.object(openai_compat, "set_key") as set_key:
+            dlg.save()
+        set_key.assert_called_once_with("https://api.example.com/v1", "sk-secret")
+        self.assertEqual(core.openai_config().model, "deepseek-chat")
+        self.assertNotIn("sk-secret", core.config_path().read_text("utf-8"))
+        self.win.backend_combo.setCurrentIndex(self.win.backend_combo.findData("openai"))
+        self.assertEqual(self.win.make_backend()[1], "openai")
 
     def test_usage_limit_pauses_with_action_and_resumes(self):
         win = self.win
