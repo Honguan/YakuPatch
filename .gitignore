@@ -24,3 +24,6 @@ real_*.json
 audit*.json
 *.log
 *.bak
+
+# Local development reference, not published
+PROJECT_PLAN.md

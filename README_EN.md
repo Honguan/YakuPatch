@@ -132,7 +132,7 @@ pip install -e .
 yakupatch-gui
 ```
 
-Run the tests with `python -X utf8 -m unittest discover -s tests -t tests`. Design and progress: [PROJECT_PLAN.md](PROJECT_PLAN.md) (Chinese).
+Run the tests with `python -X utf8 -m unittest discover -s tests -t tests`.
 
 </details>
 
