@@ -287,6 +287,28 @@ def dispatch(works: list[Work], backend, terms: dict, sleep=time.sleep, cancelle
         w.result = dst if not w.errors else None
         return w
 
+    def halves(w):
+        """Too long for one request (long credits, a whole scene in one scrolling text): translate the first and the
+        second half of the lines apart, then put them back together."""
+        lines = w.text.split("\n")
+        parts = [dataclasses.replace(w, text="\n".join(p), context=[], result=None, errors=[], attempts=0)
+                 for p in (lines[:len(lines) // 2], lines[len(lines) // 2:])]
+        for p in parts:
+            if p.text.strip():
+                solve([p], context=False)
+            else:
+                p.result = p.text                       # blank lines only, nothing to translate
+        w.attempts += sum(p.attempts for p in parts)
+        w.response = parts[-1].response
+        failed = next((p for p in parts if p.result is None), None)
+        if failed:
+            w.errors, w.result = failed.errors, None
+        else:
+            dst = "\n".join(p.result for p in parts)
+            w.errors = translate.validate(w.text, dst, w.masks, getattr(backend.config, "repeat_threshold", 4))
+            w.result = dst if not w.errors else None
+        return w
+
     def solve(group, context=True, hot=False, joined=False):
         if cancelled and cancelled.is_set():
             raise CancelledError
@@ -321,6 +343,8 @@ def dispatch(works: list[Work], backend, terms: dict, sleep=time.sleep, cancelle
         if not hot and "too_long" not in reason:
             return solve(group, context=False, hot=True, joined=joined)
         w = group[0]
+        if "too_long" in reason and "\n" in w.text:
+            return [halves(w)]
         if not joined and "\n" in w.text and {"line_count", "newlines"} & set(w.errors):
             return [rejoin(w)]
         return group

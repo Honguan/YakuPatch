@@ -256,6 +256,16 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(self.run_fake(backend)['errors'], {'too_long': 1})
         self.assertEqual(backend.calls, [])
 
+    def test_too_long_lines_are_translated_in_halves(self):
+        self.small('一行目です\n\n二行目です\n三行目です')
+        def action(obj, temp, n):
+            if any('\n' in t for t in obj['text']):
+                raise TooLong('context')
+        result = self.run_fake(Fake(action))
+        self.assertEqual((result['translated'], result['failed']), (1, 0))
+        self.assertEqual(self.store.records['0']['dst'],
+                         '\n'.join(fake_translate(s) if s else s for s in ('一行目です', '', '二行目です', '三行目です')))
+
 
 class SakuraClient(unittest.TestCase):
     def test_incomplete_read_is_transient(self):
