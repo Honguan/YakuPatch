@@ -4,9 +4,10 @@ import base64
 import json
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from yakupatch.clr import Assembly
-from yakupatch.engines.unity import _catalog, _dll_entries, _entries, _set, _table_entries
+from yakupatch.engines.unity import _Context, _catalog, _dll_entries, _entries, _set, _table_entries
 
 LINES = (Path(__file__).parent / "fixtures" / "clr" / "Lines.dll").read_bytes()    # source: Lines.cs
 
@@ -100,6 +101,19 @@ class MonoStrings(unittest.TestCase):
                          [longer if s == "よ、よろしくお願いします…" else "短" if s == "おまんこ" else s
                           for s in (asm.strings[off] for _, off in asm.ldstr)])
         self.assertEqual(Assembly(out.save({})).strings, out.strings)       # an already patched file reads back
+
+
+class TypeTree(unittest.TestCase):
+    def test_generator_failure_skips_the_object(self):
+        class Gen:
+            def get_nodes_as_json(self, asm, cls):
+                raise AssertionError("failed to dump nodes as json")
+        ctx = _Context.__new__(_Context)
+        ctx.gen, ctx.nodes = Gen(), {}
+        ms = SimpleNamespace(m_ClassName="Talk", m_AssemblyName="Assembly-CSharp.dll", m_Namespace="")
+        ctx.script = lambda obj: ms
+        with self.assertRaises(ValueError):                  # callers skip an object on ValueError
+            ctx.tree(SimpleNamespace(serialized_type=None))
 
 
 if __name__ == "__main__":

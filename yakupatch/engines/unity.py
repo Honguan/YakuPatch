@@ -82,7 +82,10 @@ class _Context:
         if key not in self.nodes:
             from UnityPy.helpers.TypeTreeNode import TypeTreeNode
             full = f"{ms.m_Namespace}.{cls}" if ms.m_Namespace else cls
-            nodes = json.loads(self.gen.get_nodes_as_json(ms.m_AssemblyName, full))
+            try:
+                nodes = json.loads(self.gen.get_nodes_as_json(ms.m_AssemblyName, full))
+            except AssertionError as ex:                     # the generator asserts when it cannot build the class
+                raise ValueError(f"無法產生 {full} 的型別樹") from ex
             for i, n in enumerate(nodes[:-3]):
                 # The generator names a list field after its element type; UnityPy then reads one string.
                 if nodes[i + 1]["m_Type"] == "Array" and nodes[i + 1]["m_Level"] == n["m_Level"] + 1 \
