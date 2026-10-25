@@ -14,6 +14,7 @@ from pathlib import Path
 from . import (__version__, dicts, engines, exchange, extract as extraction, pipeline, translate as text, vfs,
                writeback)
 from .backends.codex import CodexConfig
+from .backends.openai_compat import OpenAIConfig
 from .backends.sakura import SakuraConfig
 from .backup import Backup
 from .exchange import Store, new_run
@@ -244,7 +245,8 @@ def config_path() -> Path:
 
 
 CONFIG_KEYS = {"sakura": set(SakuraConfig.__dataclass_fields__),
-               "codex": set(CodexConfig.__dataclass_fields__) | {"privacy_ack"}}
+               "codex": set(CodexConfig.__dataclass_fields__) | {"privacy_ack"},
+               "openai": set(OpenAIConfig.__dataclass_fields__)}
 
 
 def load_config() -> dict:
@@ -265,7 +267,8 @@ def save_config(section: str, values: dict) -> None:
     unknown = set(values) - CONFIG_KEYS[section]
     if unknown:
         raise ValueError(f"未知的 {section} 設定：{', '.join(sorted(unknown))}")
-    (SakuraConfig if section == "sakura" else CodexConfig)(**{k: v for k, v in values.items() if k != "privacy_ack"})
+    {"sakura": SakuraConfig, "codex": CodexConfig, "openai": OpenAIConfig}[section](
+        **{k: v for k, v in values.items() if k != "privacy_ack"})
     data = load_config()
     data[section] = values
     atomic_write(config_path(), json.dumps(data, ensure_ascii=False, indent=1).encode("utf-8"))
@@ -277,6 +280,10 @@ def sakura_config() -> SakuraConfig:
 
 def codex_config() -> CodexConfig:
     return CodexConfig(**{k: v for k, v in load_config().get("codex", {}).items() if k != "privacy_ack"})
+
+
+def openai_config() -> OpenAIConfig:
+    return OpenAIConfig(**load_config().get("openai", {}))
 
 
 class Library:

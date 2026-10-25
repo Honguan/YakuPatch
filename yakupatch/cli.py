@@ -1,5 +1,6 @@
 """Command line. Shares yakupatch.core with the GUI (I2)."""
 import argparse
+import getpass
 import json
 import sys
 import webbrowser
@@ -8,8 +9,9 @@ from collections import Counter
 from pathlib import Path
 
 from . import core, engines, exchange, pipeline, writeback
-from .backends import codex
+from .backends import codex, openai_compat
 from .backends.codex import Codex
+from .backends.openai_compat import OpenAICompat, OpenAIConfig
 from .backends.sakura import Sakura, SakuraConfig
 from .backup import Backup
 from .extract import LanguageGateStop, extract, projects_home
@@ -33,12 +35,13 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name, help_ in [("detect", "偵測引擎"), ("extract", "提取文本"), ("status", "顯示進度"),
                         ("export", "匯出分批檔"), ("import", "匯入譯文"), ("apply", "寫回遊戲"),
-                        ("restore", "還原遊戲"), ("undo", "撤銷一次翻譯或匯入"), ("translate", "翻譯（Sakura／Codex）"),
+                        ("restore", "還原遊戲"), ("undo", "撤銷一次翻譯或匯入"), ("translate", "翻譯（Sakura／Codex／OpenAI 相容）"),
                         ("diagnose", "匯出診斷包（不含遊戲文本）")]:
         p = sub.add_parser(name, help=help_)
         p.add_argument("game", type=Path)
         if name == "translate":
-            p.add_argument("--backend", choices=["sakura", "codex"], default="sakura", help="翻譯後端（Codex 為實驗性）")
+            p.add_argument("--backend", choices=["sakura", "codex", "openai"], default="sakura",
+                           help="翻譯後端（Codex 為實驗性；openai＝任意 OpenAI 相容 API）")
             p.add_argument("--limit", type=int, help="只翻前 N 筆（名稱／系統優先）")
             p.add_argument("--dry-run", action="store_true", help="只預估，不連網、不修改專案")
             p.add_argument("--api-base", default="http://127.0.0.1:8080/v1", help="Sakura API 位址")
@@ -55,8 +58,8 @@ def main(argv=None) -> int:
             p.add_argument("--enlarge-kana", action="store_true", help="放大小假名")
             p.add_argument("--repeat-threshold", type=int, default=20, help="重複退化偵測門檻")
             p.add_argument("--effort", default="low", help="Codex 推理等級")
-            p.add_argument("--script", choices=["zh-Hant", "zh-Hans"], default="zh-Hant", help="Codex 輸出字體（不做轉換）")
-            p.add_argument("--yes", action="store_true", help="Codex 不詢問用量預估直接開始")
+            p.add_argument("--script", choices=["zh-Hant", "zh-Hans"], default="zh-Hant", help="Codex／OpenAI 相容輸出字體（不做轉換）")
+            p.add_argument("--yes", action="store_true", help="計費後端不詢問用量預估直接開始")
             translate_parser = p
         if name == "extract":
             p.add_argument("--force", action="store_true", help="遊戲已是中文仍要提取")
@@ -70,6 +73,8 @@ def main(argv=None) -> int:
             p.add_argument("--output", type=Path, help="輸出 zip（預設在專案資料夾）")
     p = sub.add_parser("codex", help="Codex 帳號（實驗性）")
     p.add_argument("action", choices=["login", "logout", "status", "models"])
+    p = sub.add_parser("openai", help="OpenAI 相容 API 的金鑰與模型（位址在設定的 openai 區段）")
+    p.add_argument("action", choices=["key", "clear", "models"])
     args = ap.parse_args(argv)
     if args.cmd == "translate" and args.backend == "sakura":   # only Sakura reads config.json, so a bad file never blocks restore
         try:
@@ -78,6 +83,17 @@ def main(argv=None) -> int:
             print(f"錯誤：{ex}")
             return 1
         args = ap.parse_args(argv)                       # command line still wins over config.json
+    elif args.cmd == "translate" and args.backend == "openai":
+        try:
+            cfg = core.openai_config() if "openai" in core.load_config() else None   # else --api-base must be given
+        except (TypeError, ValueError) as ex:
+            print(f"錯誤：設定檔 {core.config_path()} 的 openai 設定有誤：{ex}")
+            return 1
+        if cfg:
+            translate_parser.set_defaults(api_base=cfg.api_base, model=cfg.model, parallel=cfg.parallel,
+                                          timeout=cfg.timeout, retries=cfg.retries, script=cfg.output_script,
+                                          temperature=cfg.temperature, max_tokens=cfg.max_tokens)
+            args = ap.parse_args(argv)
     elif args.cmd == "translate":                        # codex section is shared with the GUI settings
         try:
             cfg = core.codex_config()
@@ -88,7 +104,7 @@ def main(argv=None) -> int:
                                       retries=cfg.retries, script=cfg.output_script)
         args = ap.parse_args(argv)
     try:
-        return _codex(args) if args.cmd == "codex" else _run(args)
+        return _codex(args) if args.cmd == "codex" else _openai(args) if args.cmd == "openai" else _run(args)
     except KeyboardInterrupt:
         print("已中斷；已完成批次已保存，重跑 translate 即可續跑。")
         return 130
@@ -123,7 +139,30 @@ def _backend(args):
     if args.backend == "codex":
         return Codex(replace(core.codex_config(), model=args.model, effort=args.effort, parallel=args.parallel or 4,
                              timeout=args.timeout, retries=args.retries, output_script=args.script))
+    if args.backend == "openai":
+        return OpenAICompat(OpenAIConfig(**{**core.load_config().get("openai", {}), "api_base": args.api_base,
+                                            "model": args.model, "parallel": args.parallel or 4, "timeout": args.timeout,
+                                            "retries": args.retries, "output_script": args.script,
+                                            "temperature": args.temperature, "max_tokens": args.max_tokens}))
     return Sakura(SakuraConfig(**{key: getattr(args, key) for key in SakuraConfig.__dataclass_fields__}))
+
+
+def _openai(args) -> int:
+    cfg = core.openai_config()
+    if args.action == "key":
+        key = getpass.getpass(f"{openai_compat.base_url(cfg.api_base)} 的 API 金鑰（輸入時不顯示）：").strip()
+        if not key:
+            print("未輸入金鑰，沒有變更。")
+            return 1
+        openai_compat.set_key(cfg.api_base, key)
+        print("已存到系統認證管理員（不寫入 config.json）。")
+    elif args.action == "clear":
+        openai_compat.clear_key(cfg.api_base)
+        print("已刪除這個 API 位址的金鑰。")
+    else:
+        for model in OpenAICompat(cfg).list_models():
+            print(model)
+    return 0
 
 
 def _codex(args) -> int:

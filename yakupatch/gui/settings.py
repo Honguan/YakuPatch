@@ -1,4 +1,4 @@
-"""Settings dialog (§11.9, I2 scope): Sakura, Codex, advanced. Values go through core.save_config."""
+"""Settings dialog (§11.9, I2 scope): Sakura, Codex, OpenAI-compatible, advanced. Values go through core.save_config."""
 import webbrowser
 from dataclasses import fields
 from pathlib import Path
@@ -8,8 +8,9 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
                                QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
 
 from .. import core, dicts
-from ..backends import codex
+from ..backends import codex, openai_compat
 from ..backends.codex import Codex, Credentials
+from ..backends.openai_compat import OpenAICompat, OpenAIConfig
 from ..backends.sakura import Sakura, SakuraConfig
 from .models import tr
 
@@ -33,6 +34,7 @@ class SettingsDialog(QDialog):
         tabs = QTabWidget()
         tabs.addTab(self._sakura(), tr("Sakura"))
         tabs.addTab(self._codex(), tr("Codex（實驗性）"))
+        tabs.addTab(self._openai(), tr("OpenAI 相容"))
         tabs.addTab(self._advanced(), tr("進階"))
         tabs.addTab(self._dicts(), tr("字典"))
         tabs.setCurrentIndex(tab)
@@ -161,6 +163,85 @@ class SettingsDialog(QDialog):
                 "effort": self.effort.currentText().strip(), "parallel": self.parallel.value(),
                 "output_script": self.script.currentData(), "privacy_ack": self.privacy.isChecked()}
 
+    # ---------- OpenAI-compatible (F5) ----------
+    def _openai(self):
+        w = QWidget()
+        form = QFormLayout(w)
+        saved = self.config.get("openai", {})
+        self.oa_base = QLineEdit(saved.get("api_base", ""), placeholderText="https://api.deepseek.com/v1")
+        form.addRow(tr("API 位址"), self.oa_base)
+        self.oa_key = QLineEdit(echoMode=QLineEdit.Password)
+        self.oa_key.setPlaceholderText(tr("已存金鑰，留空＝不變") if saved.get("api_base") and openai_compat.get_key(
+            saved["api_base"]) else tr("本機伺服器可留空"))
+        form.addRow(tr("API 金鑰"), self.oa_key)
+        self.oa_model = QComboBox(editable=True)
+        self.oa_model.addItem(saved.get("model", ""))
+        models = QHBoxLayout()
+        models.addWidget(self.oa_model, 1)
+        models.addWidget(QPushButton(tr("取得模型清單"), clicked=self.load_openai_models))
+        form.addRow(tr("模型（空白＝清單第一個）"), models)
+        self.oa_parallel = QSpinBox(minimum=1, maximum=64, value=int(saved.get("parallel", 4)))
+        form.addRow(tr("平行數"), self.oa_parallel)
+        self.oa_temperature = QDoubleSpinBox(minimum=0, maximum=2, decimals=2, singleStep=0.05,
+                                             value=float(saved.get("temperature", 0.3)))
+        form.addRow(tr("溫度"), self.oa_temperature)
+        self.oa_script = QComboBox()
+        self.oa_script.addItem(tr("繁體中文"), "zh-Hant")
+        self.oa_script.addItem(tr("簡體中文"), "zh-Hans")
+        self.oa_script.setCurrentIndex(0 if saved.get("output_script", "zh-Hant") == "zh-Hant" else 1)
+        form.addRow(tr("輸出字體"), self.oa_script)
+        self.oa_json = QCheckBox(tr("要求 JSON 輸出（伺服器不支援時自動關閉）"), checked=bool(saved.get("json_mode", True)))
+        form.addRow("", self.oa_json)
+        self.oa_status = QLabel()
+        form.addRow(QPushButton(tr("測試連線"), clicked=self.test_openai), self.oa_status)
+        form.addRow(QLabel(tr("適用 DeepSeek、OpenAI、OpenRouter、Ollama、LM Studio 等。金鑰只存在系統認證管理員；"
+                              "雲端 API 會收到遊戲文本並計費。")))
+        return w
+
+    def openai_values(self) -> dict:
+        return {**self.config.get("openai", {}), "api_base": self.oa_base.text().strip(),
+                "model": self.oa_model.currentText().strip(), "parallel": self.oa_parallel.value(),
+                "temperature": self.oa_temperature.value(), "output_script": self.oa_script.currentData(),
+                "json_mode": self.oa_json.isChecked()}
+
+    def _openai_backend(self) -> OpenAICompat:
+        config = OpenAIConfig(**self.openai_values())
+        return OpenAICompat(config, key=self.oa_key.text().strip() or None)
+
+    def load_openai_models(self):
+        try:
+            backend = self._openai_backend()
+        except (TypeError, ValueError) as ex:
+            self.oa_status.setText(str(ex))
+            return
+
+        def done(job):
+            if job.error:
+                self.oa_status.setText(str(job.error))
+                return
+            current = self.oa_model.currentText()
+            self.oa_model.clear()
+            self.oa_model.addItems(list(job.result))
+            if current:
+                self.oa_model.setCurrentText(current)
+
+        self.window_.run_bg(lambda job: backend.list_models(), done, tr("取得模型"))
+
+    def test_openai(self):
+        try:
+            backend = self._openai_backend()
+        except (TypeError, ValueError) as ex:
+            self.oa_status.setText(str(ex))
+            return
+        self.oa_status.setText(tr("測試中…"))
+
+        def check(job):
+            backend.prepare()
+            backend.complete([{"role": "user", "content": '只回覆這個 JSON：{"ok":true}'}])   # model name and key are only checked here
+            return tr("已連線：{}").format(backend.model)
+
+        self.window_.run_bg(check, lambda job: self.oa_status.setText(str(job.error or job.result)), tr("測試 API"))
+
     # ---------- dictionaries (§6.10) ----------
     def _dicts(self):
         w = QWidget()
@@ -258,7 +339,16 @@ class SettingsDialog(QDialog):
         try:
             core.save_config("sakura", self.sakura_values())
             core.save_config("codex", self.codex_values())
+            values = self.openai_values()
+            if values["api_base"] or "openai" in self.config:      # an untouched tab needs no address
+                core.save_config("openai", values)
         except (TypeError, ValueError) as ex:
             QMessageBox.warning(self, "YakuPatch", tr("設定未儲存：{}").format(ex))
             return
+        if self.oa_key.text().strip():
+            try:
+                openai_compat.set_key(values["api_base"], self.oa_key.text().strip())
+            except Exception as ex:          # keyring backends raise their own types
+                QMessageBox.warning(self, "YakuPatch", tr("金鑰未儲存：{}").format(ex))
+                return
         self.accept()
