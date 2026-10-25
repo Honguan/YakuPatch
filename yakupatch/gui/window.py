@@ -1,6 +1,7 @@
 """Main window (§11.2): library on the left, five-step bar, tabs, job queue at the bottom.
 
 Long work runs on core.JobQueue threads; results and Store changes come back through Qt signals."""
+import threading
 import time
 from pathlib import Path
 
@@ -43,6 +44,7 @@ class Bridge(QObject):
     """Store and job callbacks fire on worker threads; signals queue them onto the GUI thread."""
     store_changed = Signal(str, object)
     job_changed = Signal(object)
+    update_found = Signal(str, str)
 
 
 class MainWindow(QMainWindow):
@@ -57,6 +59,7 @@ class MainWindow(QMainWindow):
         self.queue.listeners.append(self.bridge.job_changed.emit)
         self.bridge.job_changed.connect(self._job_changed)
         self.bridge.store_changed.connect(self._store_changed)
+        self.bridge.update_found.connect(self._update_found)
         self.games: dict[str, tuple] = {}         # key -> (game, plugin, store), one Store per game (single writer)
         self.callbacks: dict = {}
         self.jobs: list = []
@@ -67,6 +70,19 @@ class MainWindow(QMainWindow):
         self._dirty = QTimer(self, singleShot=True, interval=300, timeout=self._refresh_counts)
         self._build()
         self.refresh_library()
+
+    def check_update(self):
+        """Look for a newer release in the background; only a status-bar link, nothing is downloaded."""
+        def run():
+            found = core.newer_release()
+            if found:
+                self.bridge.update_found.emit(*found)
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _update_found(self, tag: str, url: str):
+        label = QLabel(tr('有新版本 {}：<a href="{}">前往下載</a>').format(tag, url), openExternalLinks=True)
+        self.statusBar().addPermanentWidget(label)
 
     # ---------- layout ----------
     def _build(self):

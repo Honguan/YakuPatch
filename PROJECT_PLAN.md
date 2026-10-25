@@ -918,7 +918,7 @@ docs/           使用說明、引擎支援表、遊戲規則檔與交換檔格�
 | **I3 一致性 + 文字腳本引擎** | 已實作（2026-10-23）：術語種子、外部字典（§6.10）、T13 全文 QA、`style.md`、自動換行；Ren'Py、Tyrano。實機驗收：Tyrano 3 款、Ren'Py 1 款（遊戲庫只有 1 款日文且無中文的 Ren'Py）寫回後讀回全為譯文，Ren'Py `compile` 無錯、0 句對話缺譯；QA 在 3 款抓到植入的同名異譯；4 款以 Codex 真實譯文重跑後，使用者實機檢查通過。詳見 `docs/I3_REPORT.md` | 各引擎隨機 3 款實機通過；QA 能抓出刻意植入的同名異譯 |
 | **I4 封包引擎** | 完成（2026-10-24）：KiriKiri（未加密 XP3，譯文寫成新的 `patch.xp3`）實機通過 1 款；Unity Mono 的 UI 元件、Utage、Naninovel、自訂類別、`Assembly-CSharp.dll` 字串與字型統一（F20），隨機 3 款實機全部通過；I2 Localization、Fungus、IL2CPP 未做。詳見 `docs/I4_REPORT.md` | Unity 隨機 3 款至少 2 款可用且無方塊字；KiriKiri 未加密款可用 |
 | **I5 擴充** | 完成（2026-10-25）：Godot（`.pck` 內 `.tscn`／`.tres` 文字屬性、Godot 3 `.gdc` 字串、字型替換）已實作，1 款實機通過；Artemis（`.pfs` 內 `.ast`／`.tbl`，譯文寫成新的 `.pfs.NNN`）1 款實機通過；Wolf RPG（散檔 `.mps`／`CommonEvent.dat`／資料庫，CP932 策略 D：罕用漢字替代＋附字型）1 款實機通過。詳見 `docs/I5_REPORT.md`。CatSystem2、SRPG Studio 暫緩（庫內日文樣本的劇本／專案資料全部加密，依 §1.3 不解密），未達各引擎 1 款 | 各引擎至少 1 款實機通過 |
-| **I6 發佈** | 安裝包一鍵啟動（§12.1）：免設定壓縮包 `YakuPatch_win.zip`（Python 嵌入版 + 依賴 + `launch_win.bat`）、一行 PowerShell 安裝腳本 `install.ps1`、依賴檢查與補裝、GitHub Actions 自動建置、使用說明、v1.0 | 在未安裝 Python 的乾淨 Windows 10／11 電腦上：壓縮包解壓後雙擊 `launch_win.bat`、以及執行安裝腳本，兩種方式都能啟動 GUI，並用隨機 1 款遊戲走完提取→翻譯→寫回→啟動→還原 |
+| **I6 發佈** | 已實作（2026-10-25，v1.0.0）：`requirements.lock`、`install.ps1`（建置壓縮包也用它）、`launch_win.bat` 依賴檢查與補裝、GitHub Actions、GUI 新版提示；壓縮包與 `iex` 安裝在清空 PATH 的環境下可啟動 GUI，19_godot 走完提取→翻譯→寫回→啟動→還原。乾淨電腦驗收與 Actions 尚未執行。詳見 `docs/I6_REPORT.md`。原規劃：安裝包一鍵啟動（§12.1）：免設定壓縮包 `YakuPatch_win.zip`（Python 嵌入版 + 依賴 + `launch_win.bat`）、一行 PowerShell 安裝腳本 `install.ps1`、依賴檢查與補裝、GitHub Actions 自動建置、使用說明、v1.0 | 在未安裝 Python 的乾淨 Windows 10／11 電腦上：壓縮包解壓後雙擊 `launch_win.bat`、以及執行安裝腳本，兩種方式都能啟動 GUI，並用隨機 1 款遊戲走完提取→翻譯→寫回→啟動→還原 |
 
 ### 15.1 成功指標
 以使用者遊戲庫（365 款）為基準，每輪疊代結束時量測：

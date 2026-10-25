@@ -11,4 +11,5 @@ def main() -> int:
     app.setApplicationName("YakuPatch")
     window = MainWindow()
     window.show()
+    window.check_update()
     return app.exec()
