@@ -58,6 +58,7 @@ class Units(unittest.TestCase):
         self.assertIn("kana_residue", translate.validate("今日はいい天気", "今日はいい天气", {}))
         self.assertIn("newlines", translate.validate("あ\nい", "啊", {}))
         self.assertIn("extra_text", translate.validate("こんにちは", "翻译：你好", {}))
+        self.assertEqual(translate.validate("以下は、スキル用の枠です。", "以下是技能用的栏位。", {}), [])
         self.assertIn("repetition", translate.validate("はい", "是是是是是", {}))
         self.assertEqual(translate.validate("ああぁぁっ", "啊啊啊啊啊", {}), [])     # small kana are the same moan
         self.assertEqual(translate.validate("コンティニュー", "继续", {}), [])          # katakana loanword shrinks

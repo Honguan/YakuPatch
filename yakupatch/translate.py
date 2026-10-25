@@ -76,7 +76,7 @@ def validate(src: str, dst: str, masks: dict[str, str], repeat_threshold: int = 
     # ああ…ぁぁぁ is one long moan; with small kana folded the source repeats as much as 啊啊啊… does.
     if repeat.search(dst) and not repeat.search(src.translate(_SMALL_KANA)):
         errors.append("repetition")
-    if _EXTRA.search(dst) and not _EXTRA.search(src):
+    if _EXTRA.search(dst) and not _EXTRA.search(src) and not src.lstrip().startswith("以下"):   # 以下は… → 以下是…
         errors.append("extra_text")
     return errors
 
