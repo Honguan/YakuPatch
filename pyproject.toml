@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "yakupatch"
-version = "0.1.0"
+version = "1.0.0"
 description = "Translate game text by patching game files directly, with backup and restore."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
-dependencies = ["opencc-python-reimplemented>=0.1.7", "keyring>=24", "PySide6>=6.7", "UnityPy>=1.25", "TypeTreeGeneratorAPI>=0.0.10"]
+dependencies = ["opencc-python-reimplemented>=0.1.7", "keyring>=24", "PySide6-Essentials>=6.7", "UnityPy>=1.25", "TypeTreeGeneratorAPI>=0.0.10", "fonttools>=4.40"]
 
 [project.urls]
 Repository = "https://github.com/Honguan/YakuPatch"

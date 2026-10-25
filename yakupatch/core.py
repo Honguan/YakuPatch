@@ -2,8 +2,10 @@
 import json
 import os
 import platform
+import re
 import subprocess
 import threading
+import urllib.request
 import zipfile
 from collections import Counter
 from datetime import datetime
@@ -17,6 +19,26 @@ from .backup import Backup
 from .exchange import Store, new_run
 from .extract import project_dir, projects_home
 from .fsutil import atomic_write
+
+RELEASES = "https://api.github.com/repos/Honguan/YakuPatch/releases/latest"
+
+
+def newer_release(current: str = __version__, timeout: float = 5) -> tuple[str, str] | None:
+    """GUI startup check (§12.1): (tag, page) of a GitHub release newer than `current`; None when up to date,
+    offline or there is no release. Only tells; never downloads."""
+    try:
+        req = urllib.request.Request(RELEASES, headers={"Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = json.load(r)
+    except (OSError, ValueError):
+        return None
+    tag = data.get("tag_name") or ""
+    return (tag, data.get("html_url") or "") if _version(tag) > _version(current) else None
+
+
+def _version(s: str) -> tuple[int, ...]:
+    return tuple(int(n) for n in re.findall(r"\d+", s)[:3])
+
 
 LANG = {"ja": "日文", "mixed": "混合", "zh-Hans": "簡中", "zh-Hant": "繁中", "zh": "中文", "unknown": "未知",
         "packs": "中文包"}

@@ -1,0 +1,40 @@
+# Build YakuPatch_win.zip (PROJECT_PLAN 12.1) with the bundled Python, run the tests on that runtime, and attach the
+# zip to the GitHub release of a pushed v* tag. A manual run only uploads the zip as a workflow artifact.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Build YakuPatch_win.zip
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build_win.ps1
+
+      - name: Test with the bundled runtime
+        shell: powershell
+        run: |
+          build\YakuPatch\runtime\python.exe -m yakupatch.depcheck
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          build\YakuPatch\runtime\python.exe -X utf8 -m unittest discover -s tests -t tests
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: YakuPatch_win
+          path: dist/YakuPatch_win.zip
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v3.0.3
+        with:
+          files: dist/YakuPatch_win.zip
