@@ -201,7 +201,7 @@ class CodexTests(unittest.TestCase):
                 return Response(json.dumps({"models": [{"slug": "m1", "supported_reasoning_levels": [{"effort": "low"}]},
                                                        {"slug": "hidden", "visibility": "hide"}]}).encode())
             bodies.append(json.loads(request.data))
-            items = json.loads(bodies[-1]["input"][0]["content"][0]["text"])["items"]
+            items = json.loads(bodies[-1]["input"][0]["content"][0]["text"]).get("items", [{"id": "0", "text": "要約"}])
             return sse(completed(json.dumps({"translations": [{"id": i["id"], "translation": fake_translate(i["text"])}
                                                               for i in items]})))
         backend = Codex(CodexConfig(), self.creds, opener)

@@ -119,7 +119,7 @@ class OpenAICompat:
         if self.key and urlsplit(self.base).scheme == "http" and not is_local(self.base):
             raise ValueError("API 金鑰不能以未加密的 http 送到外部位址，請改用 https")
         self.caps = BackendCaps(io_format="json_ids", max_input_tokens=config.max_input_tokens, max_items=config.max_items,
-                                max_parallel=config.parallel, output_script=config.output_script, style=True,
+                                max_parallel=config.parallel, output_script=config.output_script, style=True, summary=True,
                                 metered=not is_local(self.base))
 
     @property
@@ -154,10 +154,13 @@ class OpenAICompat:
         terms = {k: v for w in works for k, v in w.terms.items()}
         body = {"glossary": [{"src": s, "dst": d, **({"note": n} if n else {})}
                              for s, (d, n) in sorted(terms.items(), key=lambda kv: -len(kv[0]))],
+                **({"summary": works[0].summary} if works[0].summary else {}),
                 "context": works[0].context if context else [],
                 "items": [{"id": str(i), "text": w.text, **({"speaker": w.speaker} if w.speaker else {})}
                           for i, w in enumerate(works)]}
         style = f"\n翻譯風格（使用者指定；與上面規則衝突時以規則為準）：\n{self.style}" if self.style else ""
+        if works[0].summary:                                   # F14
+            style = "\nsummary 是前面劇情的摘要，只供理解人物、人稱與語氣，不要翻譯。" + style
         return [{"role": "system", "content": INSTRUCTIONS[self.config.output_script] + "\n" + RULES + "\n" + FORMAT + style},
                 {"role": "user", "content": json.dumps(body, ensure_ascii=False)}]
 

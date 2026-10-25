@@ -31,6 +31,7 @@ class Work:
     errors: list[str] = field(default_factory=list)
     attempts: int = 0
     response: str | None = None        # the backend's last raw answer, logged when the line fails
+    summary: str = ""                  # F14 scene summary of the file so far (caps.summary backends only)
 
 
 class RunLog:
@@ -85,6 +86,51 @@ def style(store: Store) -> str:
 def use_style(store: Store, backend) -> None:
     if backend.caps.style:
         backend.style = style(store)
+
+
+SUMMARY_PROMPT = ("你是遊戲劇情摘要助手。輸入的 previous 是這個場景先前的摘要，lines 是接下來已翻譯的台詞（依順序）。"
+                  "請用{}寫一段新的場景摘要，不超過 200 字：出場人物、彼此稱呼與人稱、說話語氣、目前情節。"
+                  '只輸出一個 JSON 物件：{{"translations":[{{"id":"0","translation":"摘要"}}]}}')
+
+
+def scenes(store: Store) -> dict:
+    """F14: per-file scene summaries, kept between runs so a resumed job continues the story."""
+    path = store.dir / "summary.json"
+    return json.loads(path.read_text("utf-8")) if path.exists() else {}
+
+
+def summarize(backend, previous: str, lines: list[str]) -> str:
+    """Uses the backend's own translation format (id 0 carries the summary), so no extra schema is needed."""
+    script = "繁體中文" if backend.caps.output_script == "zh-Hant" else "簡體中文"
+    body = json.dumps({"previous": previous, "lines": lines}, ensure_ascii=False)
+    response = backend.complete([{"role": "system", "content": SUMMARY_PROMPT.format(script)},
+                                 {"role": "user", "content": body}])
+    try:
+        text = json.loads(response)["translations"][0]["translation"]
+    except (ValueError, KeyError, IndexError, TypeError):
+        raise ValueError("bad_json") from None
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("bad_json")
+    return text.strip()[:400]
+
+
+def update_scenes(store: Store, backend, story: dict, wave: list[list[Work]], log) -> None:
+    """After each wave, fold the newly translated lines of every touched file into its summary (one call per file).
+    A failed summary keeps the previous one: it only helps consistency and never blocks translation."""
+    lines = {}
+    for group in wave:
+        for w in group:
+            rec = store.records[w.id]
+            if rec["status"] == "translated" and rec["kind"] == "dialogue":
+                lines.setdefault(rec["refs"][0]["file"], []).append(
+                    (f"{rec['speaker']}：" if rec.get("speaker") else "") + rec["dst"])
+    for file, new in lines.items():
+        try:
+            story[file] = summarize(backend, story.get(file, ""), new)
+        except (Transient, TooLong, Refused, ValueError) as ex:
+            log("summary_failed", file=file, error=str(ex))
+    if lines:
+        atomic_write(store.dir / "summary.json", json.dumps(story, ensure_ascii=False, indent=1).encode("utf-8"))
 
 
 def update_glossary(store: Store) -> None:
@@ -144,7 +190,8 @@ def batches(works: list[Work], backend, terms: dict, store: Store) -> list[list[
 
 
 def cache_key(work: Work, backend, terms: dict) -> str:
-    data = [backend.cache_identity, work.text, work.masks, work.context, work.speaker, terms]
+    data = [backend.cache_identity, work.text, work.masks, work.context, work.speaker, terms] + \
+        ([work.summary] if work.summary else [])          # no summary: keys stay as before F14
     return hashlib.sha256(json.dumps(data, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
@@ -166,9 +213,15 @@ def estimate(store: Store, codes: list[str], backend, limit=None, only=None, fre
     hits = 0 if fresh else sum(cache_get(store, cache_key(w, backend, terms)) is not None for w in works)
     pending = works if fresh else [w for w in works if cache_get(store, cache_key(w, backend, terms)) is None]
     groups = batches(pending, backend, terms, store)
+    extra_in = extra_out = 0
+    if backend.caps.summary and backend.caps.io_format == "json_ids":   # F14: about one summary call per wave
+        waves = math.ceil(len(groups) / backend.caps.max_parallel)
+        extra_in = math.ceil(sum(len(w.text) for w in pending if store.records[w.id]["kind"] == "dialogue") * 1.5) \
+            + waves * 400
+        extra_out = waves * 300
     return {"items": len(rows), "characters": sum(len(r["src"]) for r in rows), "cached": hits,
-            "batches": len(groups), "input_tokens": sum(tokens(backend.messages(g, terms)) for g in groups),
-            "output_tokens": math.ceil(sum(len(w.text) for w in pending) * 1.5),
+            "batches": len(groups), "input_tokens": sum(tokens(backend.messages(g, terms)) for g in groups) + extra_in,
+            "output_tokens": math.ceil(sum(len(w.text) for w in pending) * 1.5) + extra_out,
             "seconds": math.ceil(len(groups) / backend.caps.max_parallel) * 30}
 
 
@@ -326,6 +379,8 @@ def run(store: Store, codes: list[str], backend, limit=None, progress=None, slee
             phase = [r for r in rows if (r["kind"] in ("name", "system")) == names]
             works = work_list(store, phase, codes, terms)
             groups = batches(works, backend, terms, store)
+            use_summary = not names and backend.caps.summary and backend.caps.io_format == "json_ids"
+            story = scenes(store) if use_summary else {}
             pool = ThreadPoolExecutor(max_workers=backend.caps.max_parallel)
             cancelled = threading.Event()
             try:
@@ -335,10 +390,12 @@ def run(store: Store, codes: list[str], backend, limit=None, progress=None, slee
                         stats["stopped"] = True
                         break
                     futures, keys = [], {}
-                    for group in groups[start:start + backend.caps.max_parallel]:
+                    wave = groups[start:start + backend.caps.max_parallel]
+                    for group in wave:
                         refreshed = work_list(store, [store.records[w.id] for w in group], codes, terms)
                         pending = []
                         for w in refreshed:
+                            w.summary = story.get(store.records[w.id]["refs"][0]["file"], "")
                             keys[w.id] = cache_key(w, backend, terms)
                             cached = None if fresh else cache_get(store, keys[w.id])
                             if cached is not None and not translate.validate(w.text, cached, w.masks,
@@ -361,6 +418,8 @@ def run(store: Store, codes: list[str], backend, limit=None, progress=None, slee
                     if error:
                         log("error", error=f"{type(error).__name__}: {error}")
                         raise error
+                    if use_summary:
+                        update_scenes(store, backend, story, wave, log)
             finally:
                 cancelled.set()
                 # shortcut: urllib cannot cancel an in-flight socket, process exit can wait up to --timeout after Ctrl+C.

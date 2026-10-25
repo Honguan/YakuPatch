@@ -281,10 +281,13 @@ class Codex:
         terms = {k: v for w in works for k, v in w.terms.items()}
         body = {"glossary": [{"src": s, "dst": d, **({"note": n} if n else {})}
                              for s, (d, n) in sorted(terms.items(), key=lambda kv: -len(kv[0]))],
+                **({"summary": works[0].summary} if works[0].summary else {}),
                 "context": works[0].context if context else [],
                 "items": [{"id": str(i), "text": w.text, **({"speaker": w.speaker} if w.speaker else {})}
                           for i, w in enumerate(works)]}
         style = f"\n翻譯風格（使用者指定；與上面規則衝突時以規則為準）：\n{self.style}" if self.style else ""
+        if works[0].summary:                                   # F14
+            style = "\nsummary 是前面劇情的摘要，只供理解人物、人稱與語氣，不要翻譯。" + style
         return [{"role": "system", "content": INSTRUCTIONS[self.config.output_script] + "\n" + RULES + style},
                 {"role": "user", "content": json.dumps(body, ensure_ascii=False)}]
 

@@ -22,6 +22,7 @@
 
 * **Translation quality**
   * 🔍 **Checks every line**: a translation with broken control codes, a wrong line count, an odd length or repetition is not written; that line keeps the original.
+  * 🧠 **Scene summaries**: Codex and OpenAI-compatible backends keep a running story summary while translating, so pronouns and tone stay consistent.
   * 📖 **Consistent terms**: collects names and terms, can look them up in external dictionaries, and runs a full-text QA pass that flags inconsistent names and missed lines.
   * 🔤 **No missing glyphs**: Unity, Godot and Wolf RPG games get a Chinese font automatically.
 
