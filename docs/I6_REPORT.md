@@ -15,6 +15,7 @@
 | `yakupatch/depcheck.py` | 啟動前檢查：鎖定清單的每個套件版本相符、Qt 能載入 |
 | `yakupatch/core.py`、`yakupatch/gui/` | `newer_release`：啟動時背景查 GitHub Releases，有新版只在狀態列顯示下載連結 |
 | `.github/workflows/release.yml` | 推送 `v*` tag 時建置壓縮包、用內附 Python 跑依賴檢查與全部測試，附加到 GitHub Release；手動執行只上傳成品 |
+| `LICENSE` | GPL-3.0 全文（gnu.org 官方文字），壓縮包一併附上 |
 | `tests/test_release.py` | 新增 3 個測試：鎖定清單涵蓋所有依賴且帶雜湊、依賴檢查回報缺少與版本不符、新版比對（含離線） |
 
 ## 邏輯摘要
@@ -49,6 +50,5 @@
 - **乾淨電腦驗收未做**：驗收標準要求「未安裝 Python 的乾淨 Windows 10／11」。本機有系統 Python，只用清空 PATH 與環境變數模擬；Visual C++ 可轉散發套件本機已安裝，缺少時的錯誤訊息沒有實測。需要在乾淨電腦或 Windows 沙箱上實機檢查。
 - **GitHub Actions 未執行**：工作流程要推送 tag 才會跑，尚未驗證。測試裡 Godot／Wolf 的字型替換需要 Windows 中文字型；GitHub 的 Windows 映像若沒有雅黑／正黑，這些測試會失敗並擋下發佈。
 - **安裝腳本的網址**：`irm https://raw.githubusercontent.com/.../main/scripts/install.ps1` 要等合併到 `main` 才有效；下載的程式碼是 `main` 分支，不是指定版本。
-- **儲存庫沒有 LICENSE 檔**：README 寫明 GPL-3.0，但根目錄沒有授權全文；壓縮包會在有 LICENSE 時一併複製。
 - **選用套件**：§12.1 的「選用功能第一次用到時才提示安裝」沒有實作，目前沒有選用套件，全部依賴都在鎖定清單內。
 - **鎖定清單只適用 Windows**：其他平台從原始碼執行時請用 `pip install -e .`。
