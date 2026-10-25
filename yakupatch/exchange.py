@@ -1,4 +1,6 @@
-"""Exchange files (PROJECT_PLAN §4): manifest.json, strings.jsonl snapshot + journal.jsonl, batch export/import."""
+"""Exchange files (PROJECT_PLAN §4): manifest.json, strings.jsonl snapshot + journal.jsonl, batch export/import,
+share files (F15)."""
+import hashlib
 import json
 import os
 import secrets
@@ -192,6 +194,76 @@ def import_batches(store: Store, control_codes: list[str], files: list[Path], ru
             accepted += 1
         if bad_lines:
             atomic_write(path.with_suffix(".rejected.jsonl"), ("\n".join(bad_lines) + "\n").encode("utf-8"))
+    store.update_many(run, items)
+    return accepted, rejected
+
+
+def mask_dst(dst: str, masks: dict) -> str:
+    """Put placeholders back into a stored translation, longest control code first."""
+    dst = translate.normalize(dst)[0]
+    for key, code in sorted(masks.items(), key=lambda kv: -len(kv[1])):
+        dst = dst.replace(code, key)
+    return dst
+
+
+def _src_hash(masked: str) -> str:
+    return hashlib.sha256(masked.encode("utf-8")).hexdigest()[:16]
+
+
+def export_share(store: Store, engine: str, control_codes: list[str], path: Path) -> int:
+    """F15: translations only. Source lines appear as hashes, so the file carries no game text."""
+    lines = []
+    for r in store.records.values():
+        if r["status"] in ("translated", "reviewed") and r.get("dst"):
+            masked, masks = translate.mask(translate.normalize(r["src"])[0], control_codes)
+            lines.append(json.dumps({"id": r["id"], "sha": _src_hash(masked), "dst": mask_dst(r["dst"], masks)},
+                                    ensure_ascii=False))
+    header = json.dumps({"yakupatch_share": 1, "engine": engine, "count": len(lines)}, ensure_ascii=False)
+    atomic_write(path, ("\n".join([header, *lines]) + "\n").encode("utf-8"))
+    return len(lines)
+
+
+def is_share(path: Path) -> bool:
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            return '"yakupatch_share"' in f.readline(200)
+    except (OSError, UnicodeError):
+        return False
+
+
+def import_share(store: Store, engine: str, control_codes: list[str], path: Path, run: str) -> tuple[int, dict[str, int]]:
+    """Each line is matched by id and source hash, then passes the same checks as a batch import."""
+    rows = path.read_text("utf-8-sig").splitlines()
+    try:
+        header = json.loads(rows[0]) if rows else {}
+    except json.JSONDecodeError:
+        header = {}
+    if not isinstance(header, dict) or header.get("yakupatch_share") != 1:
+        raise ValueError(f"{path.name} 不是 YakuPatch 譯文分享檔")
+    if header.get("engine") != engine:
+        raise ValueError(f"分享檔是 {header.get('engine')} 引擎的譯文，這款遊戲是 {engine}")
+    accepted, rejected, items = 0, {}, []
+    for line in rows[1:]:
+        if not line.strip():
+            continue
+        try:
+            obj = json.loads(line)
+            rec = store.records.get(obj["id"])
+        except (json.JSONDecodeError, KeyError, TypeError):
+            rejected["bad_json"] = rejected.get("bad_json", 0) + 1
+            continue
+        if rec is not None:
+            masked, _ = translate.mask(translate.normalize(rec["src"])[0], control_codes)
+            if obj.get("sha") != _src_hash(masked):
+                rec = None                                   # same id, different source: a different game version
+        reason, fields = ("unknown_id", {}) if rec is None else _check_line(
+            store, control_codes, json.dumps({"id": rec["id"], "src": masked, "dst": obj.get("dst")}, ensure_ascii=False))
+        if reason:
+            rejected[reason] = rejected.get(reason, 0) + 1
+            continue
+        fields["by"] = f"share:{path.name}"
+        items.append((fields.pop("id"), fields))
+        accepted += 1
     store.update_many(run, items)
     return accepted, rejected
 

@@ -34,7 +34,8 @@ def main(argv=None) -> int:
     ap.add_argument("--home", type=Path, help="專案資料存放位置（預設 ~/.yakupatch/projects）")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name, help_ in [("detect", "偵測引擎"), ("extract", "提取文本"), ("status", "顯示進度"),
-                        ("export", "匯出分批檔"), ("import", "匯入譯文"), ("apply", "寫回遊戲"),
+                        ("export", "匯出分批檔"), ("import", "匯入譯文（分批檔或分享檔）"),
+                        ("share", "匯出譯文分享檔（不含遊戲原文）"), ("apply", "寫回遊戲"),
                         ("restore", "還原遊戲"), ("undo", "撤銷一次翻譯或匯入"), ("translate", "翻譯（Sakura／Codex／OpenAI 相容）"),
                         ("diagnose", "匯出診斷包（不含遊戲文本）")]:
         p = sub.add_parser(name, help=help_)
@@ -64,11 +65,13 @@ def main(argv=None) -> int:
         if name == "extract":
             p.add_argument("--force", action="store_true", help="遊戲已是中文仍要提取")
         if name == "import":
-            p.add_argument("files", nargs="*", type=Path, help="預設為 batches/in/*.jsonl")
+            p.add_argument("files", nargs="*", type=Path, help="預設為 batches/in/*.jsonl；也可指定分享檔")
         if name == "apply":
             p.add_argument("--yes", action="store_true", help="確認寫回（不加只顯示預覽）")
         if name == "undo":
             p.add_argument("run", nargs="?", help="不指定時列出可撤銷的紀錄")
+        if name == "share":
+            p.add_argument("--output", type=Path, help="輸出檔（預設在專案資料夾）")
         if name == "diagnose":
             p.add_argument("--output", type=Path, help="輸出 zip（預設在專案資料夾）")
     p = sub.add_parser("codex", help="Codex 帳號（實驗性）")
@@ -129,6 +132,10 @@ def _sakura_defaults(config: Path) -> dict:
         raise ValueError(f"設定檔 {config} 有未知的 sakura 設定：{', '.join(unknown)}"
                          f"（可用：{', '.join(SakuraConfig.__dataclass_fields__)}）")
     return out
+
+
+def _share_name(game: Path) -> str:
+    return game.parent.name if game.name.lower() == "www" else game.name
 
 
 def _open(args) -> tuple[Path, engines.EnginePlugin, Store]:
@@ -239,13 +246,16 @@ def _run(args) -> int:
         files = args.files or sorted((store.dir / "batches" / "in").glob("part-*.jsonl"))
         if not files:
             raise ValueError(f"沒有可匯入的檔案，請放到 {store.dir / 'batches' / 'in'}")
-        run = exchange.new_run()
-        ok, bad = exchange.import_batches(store, plugin.control_codes, files, run)
+        run, ok, bad = core.import_batches(store, plugin, files)
         print(f"匯入紀錄 {run}：通過 {ok} 句，拒絕 {sum(bad.values())} 句")
         for reason, n in sorted(bad.items(), key=lambda kv: -kv[1]):
             print(f"  {_REASON.get(reason, reason)}：{n}")
         if bad:
             print("被拒絕的句子已寫入同名的 .rejected.jsonl")
+    elif args.cmd == "share":
+        path = args.output or store.dir / f"{_share_name(game)}.yakupatch.jsonl"
+        n = core.export_share(store, plugin, path)
+        print(f"已匯出 {n} 句譯文到 {path}（只含譯文與原文雜湊，不含遊戲原文）")
     elif args.cmd == "apply":
         plan = writeback.plan(game, store, plugin)
         for w in plan.warnings[:20]:

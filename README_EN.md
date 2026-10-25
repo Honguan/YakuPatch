@@ -17,6 +17,7 @@
 * **Works on the game itself, no separate extraction tool**
   * 🎮 **8 engines**: detects the engine, then extracts, translates and writes back in one flow.
   * 🛡️ **Safe and reversible**: backs up before writing and restores in one click; each translation run can be undone on its own.
+  * 🤝 **Share translations**: export a share file that holds only the translations (no game text); others apply it to the same game with 匯入譯文 (Import translations).
   * 🈶 **Stops on Chinese games**: skips games that are already in Chinese or ship a Chinese language pack.
 
 * **Translation quality**
@@ -91,6 +92,8 @@
 yakupatch.bat extract   "D:\Games\MyGame"
 yakupatch.bat translate "D:\Games\MyGame" --backend sakura
 yakupatch.bat apply     "D:\Games\MyGame" --yes
+yakupatch.bat share     "D:\Games\MyGame"
+yakupatch.bat import    "D:\Games\MyGame" MyGame.yakupatch.jsonl
 yakupatch.bat restore   "D:\Games\MyGame"
 ```
 
@@ -134,4 +137,4 @@ Run the tests with `python -X utf8 -m unittest discover -s tests -t tests`. Desi
 
 [GPL-3.0-or-later](LICENSE). The Sakura prompts and the Codex request format follow [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator) (GPL-3.0).
 
-For translating games you legally own, for personal use only. Share only the exchange files, never the game files.
+For translating games you legally own, for personal use only. Share only the share files, never the game files.

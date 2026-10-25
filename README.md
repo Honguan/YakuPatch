@@ -17,6 +17,7 @@
 * **直接處理遊戲，不必另找提取工具**
   * 🎮 **8 種引擎**：自動偵測引擎，提取文本、翻譯、寫回一次完成。
   * 🛡️ **安全可還原**：寫回前先備份，一鍵還原；每次翻譯都能單獨撤銷。
+  * 🤝 **分享譯文**：匯出只含譯文的分享檔（不含遊戲原文），對方用「匯入譯文」即可套用到同一款遊戲。
   * 🈶 **已是中文就停下**：遊戲已是中文或內建中文語言包時，不會重複翻譯。
 
 * **翻譯品質**
@@ -89,6 +90,8 @@
 yakupatch.bat extract   "D:\Games\MyGame"
 yakupatch.bat translate "D:\Games\MyGame" --backend sakura
 yakupatch.bat apply     "D:\Games\MyGame" --yes
+yakupatch.bat share     "D:\Games\MyGame"
+yakupatch.bat import    "D:\Games\MyGame" MyGame.yakupatch.jsonl
 yakupatch.bat restore   "D:\Games\MyGame"
 ```
 
@@ -132,4 +135,4 @@ yakupatch-gui
 
 [GPL-3.0-or-later](LICENSE)。Sakura 提示詞與 Codex 請求格式參考 [BallonsTranslator](https://github.com/dmMaze/BallonsTranslator)（GPL-3.0）。
 
-僅供翻譯你合法持有的遊戲、個人使用。分享時請只分享交換檔，不要分享遊戲檔案。
+僅供翻譯你合法持有的遊戲、個人使用。分享時請只分享譯文分享檔，不要分享遊戲檔案。
