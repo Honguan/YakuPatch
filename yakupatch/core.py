@@ -13,6 +13,7 @@ from pathlib import Path
 
 from . import (__version__, dicts, engines, exchange, extract as extraction, pipeline, translate as text, vfs,
                writeback)
+from .backends import AuthRequired, BackendError, ConfigError, UsageLimit
 from .backends.codex import CodexConfig
 from .backends.openai_compat import OpenAIConfig
 from .backends.sakura import SakuraConfig
@@ -86,6 +87,43 @@ def translate(store: Store, plugin, backend, limit=None, progress=None, stop=Non
                             only=only, fresh=fresh)
     finally:
         store.busy = False
+
+
+def batch(paths: list, make_backend, home: Path | None = None, apply=False, limit=None, progress=None,
+          stop=None, opener=None) -> list[dict]:
+    """F16: extract (first time only) → translate → optionally apply, one game after another. A game that fails is
+    reported and the next one runs; a problem the user must fix (login, quota, settings) ends the batch.
+    `opener(path)` lets the GUI pass its open Stores, so one project never has two Store objects in memory."""
+    results = []
+    for i, path in enumerate(paths):
+        if stop is not None and stop.is_set():
+            break
+        row = {"game": str(path), "status": "ok", "translated": 0, "failed": 0, "files": 0, "error": ""}
+        results.append(row)
+        try:
+            game, plugin, store = opener(path) if opener else open_game(path, home)
+            row["game"] = str(game)
+            if not store.manifest:
+                extract(game, plugin, store)
+            result = translate(store, plugin, make_backend(), limit, stop=stop,
+                               progress=progress and (lambda s: progress({**s, "game": row["game"], "index": i,
+                                                                          "of": len(paths)})))
+            row.update(translated=result["translated"], failed=result["failed"])
+            if result.get("stopped"):
+                row["status"] = "stopped"
+            elif apply:
+                plan = writeback.plan(game, store, plugin)
+                if plan.files:
+                    writeback.commit(game, plan)
+                row["files"] = len(plan.files)
+        except extraction.LanguageGateStop:
+            row["status"] = "skip"
+        except (AuthRequired, UsageLimit, ConfigError) as ex:
+            row.update(status="paused", error=str(ex))
+            break
+        except (BackendError, ValueError, OSError, writeback.GameChanged) as ex:
+            row.update(status="error", error=str(ex))
+    return results
 
 
 def preview(game: Path, store: Store, plugin) -> writeback.ApplyPlan:

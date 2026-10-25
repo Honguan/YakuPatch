@@ -17,6 +17,7 @@
 * **Works on the game itself, no separate extraction tool**
   * 🎮 **8 engines**: detects the engine, then extracts, translates and writes back in one flow.
   * 🛡️ **Safe and reversible**: backs up before writing and restores in one click; each translation run can be undone on its own.
+  * 📚 **Batch processing**: select several games in the library and right-click 批次翻譯 (Batch translate) to extract, translate and write back each one in turn.
   * 🤝 **Share translations**: export a share file that holds only the translations (no game text); others apply it to the same game with 匯入譯文 (Import translations).
   * 🈶 **Stops on Chinese games**: skips games that are already in Chinese or ship a Chinese language pack.
 
@@ -93,6 +94,7 @@ yakupatch.bat extract   "D:\Games\MyGame"
 yakupatch.bat translate "D:\Games\MyGame" --backend sakura
 yakupatch.bat apply     "D:\Games\MyGame" --yes
 yakupatch.bat share     "D:\Games\MyGame"
+yakupatch.bat batch     "D:\Games\GameA" "D:\Games\GameB" --backend sakura --apply
 yakupatch.bat import    "D:\Games\MyGame" MyGame.yakupatch.jsonl
 yakupatch.bat restore   "D:\Games\MyGame"
 ```
