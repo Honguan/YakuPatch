@@ -94,6 +94,17 @@ class SakuraKit(unittest.TestCase):
             kit.install_llama("cpu", self.tmp / "llama")
         self.assertFalse((self.tmp / "evil.exe").exists())
 
+    def test_catalogue_is_fetched_once_until_refreshed(self):
+        tree = [{"path": "m.gguf", "size": 5, "lfs": {"oid": "ab"}}, {"path": "README.md", "size": 1}]
+        kit.catalogue.cache_clear()
+        self.addCleanup(kit.catalogue.cache_clear)
+        with patch.object(kit, "_get_json", return_value=tree) as get:
+            self.assertEqual(kit.catalogue(), kit.catalogue())
+            self.assertEqual(get.call_count, len(kit.CATALOGUE))
+            kit.catalogue.cache_clear()
+            kit.catalogue()
+            self.assertEqual(get.call_count, 2 * len(kit.CATALOGUE))
+
     def test_server_listens_on_localhost_unless_lan(self):
         args = kit.server_args(Path("llama-server.exe"), Path("m.gguf"), kit.LocalConfig(slots=2, ctx_per_slot=4096))
         self.assertEqual(args[args.index("--host") + 1], "127.0.0.1")
