@@ -117,7 +117,7 @@ class SettingsDialog(QDialog):
         self.model_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         v.addWidget(self.model_table)
         row = QHBoxLayout()
-        row.addWidget(QPushButton(tr("重新整理模型清單"), clicked=self.load_catalogue))
+        row.addWidget(QPushButton(tr("重新整理模型清單"), clicked=lambda: self.load_catalogue(refresh=True)))
         row.addWidget(QPushButton(tr("下載選取的模型"), clicked=self.download_model))
         self.llama_label = QLabel()
         row.addWidget(self.llama_label, 1)
@@ -185,7 +185,7 @@ class SettingsDialog(QDialog):
                                         tr(labels[m.file]), tr("已下載") if m.file in have else "")):
                 self.model_table.setItem(i, col, QTableWidgetItem(text))
 
-    def load_catalogue(self):
+    def load_catalogue(self, refresh=False):
         def done(job):
             if job.error:
                 self.server_status.setText(tr("無法取得模型清單：{}").format(job.error))
@@ -193,6 +193,8 @@ class SettingsDialog(QDialog):
             self.models = job.result
             self._fill_models()
 
+        if refresh:
+            sakura_kit.catalogue.cache_clear()
         self.window_.run_bg(lambda job: sakura_kit.catalogue(), done, tr("取得 Sakura 模型清單"))
 
     def _selected_model(self):

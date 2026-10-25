@@ -21,7 +21,7 @@ def hashes(root):
     return {str(p.relative_to(root)): sha256(p.read_bytes()) for p in root.rglob('*') if p.is_file()}
 
 
-def cycle(source, backend, progress=None):
+def cycle(source, backend, protected=(), progress=None):
     roots = engines.find_game_roots(source.resolve())
     if len(roots) != 1:
         raise ValueError('請指定單一 MV/MZ 遊戲')
@@ -29,8 +29,7 @@ def cycle(source, backend, progress=None):
     plugin.locate(source)  # Reject encrypted MV before omitting assets from the text-only copy.
     original = hashes(source / 'data')
     tmp = Path(tempfile.mkdtemp(prefix='yakupatch-real-')).resolve()
-    protected = [Path('G:/game').resolve(), Path('D:/Games/TEMP').resolve(), source]
-    if any(tmp == p or p in tmp.parents for p in protected):
+    if any(tmp == p or p in tmp.parents for p in [*(p.resolve() for p in protected), source]):
         raise ValueError('暫存目錄落在唯讀遊戲庫，拒絕執行')
     game = tmp / 'game'
     for directory in ('data', 'js'):
@@ -63,12 +62,14 @@ if __name__ == '__main__':
     ap.add_argument('games', nargs='+', type=Path)
     ap.add_argument('--api-base', default='http://127.0.0.1:8080/v1')
     ap.add_argument('--output', type=Path, required=True)
+    ap.add_argument('--protect', type=Path, action='append', default=[],
+                    help='唯讀的遊戲庫資料夾（可重複）；輸出與暫存不得落在其中')
     args = ap.parse_args()
-    check_output(args.output, [Path('G:/game'), Path('D:/Games/TEMP'), *args.games])
+    check_output(args.output, [*args.protect, *args.games])
     backend = Sakura(SakuraConfig(api_base=args.api_base))
     backend.prepare()
     report = []
     for game in args.games:
-        report.append(cycle(game, backend, progress=lambda s: print(
+        report.append(cycle(game, backend, args.protect, progress=lambda s: print(
             f"已翻 {s['translated']} 失敗 {s['failed']}", flush=True)))
         atomic_write(args.output, json.dumps(report, ensure_ascii=False, indent=2).encode('utf-8'))

@@ -11,6 +11,7 @@ import subprocess
 import time
 import zipfile
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -74,6 +75,7 @@ def _get_json(url: str, timeout: float = 30):
 
 
 # ---------- hardware and recommendations ----------
+@cache                                                   # probed once per session
 def hardware() -> dict:
     """{"gpus": [(name, vram_bytes)], "ram": bytes, "variant": cuda|vulkan|cpu}. Best effort; never raises."""
     gpus = []
@@ -149,6 +151,7 @@ def recommend(models: list[Model], vram: int, ram: int = 0) -> dict[str, str]:
 
 
 # ---------- catalogue ----------
+@cache                                                   # failures are not cached; cache_clear() refreshes
 def catalogue() -> list[Model]:
     out = []
     for repo, only, note in CATALOGUE:
