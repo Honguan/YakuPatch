@@ -10,6 +10,8 @@ from urllib.request import Request, urlopen
 from . import AuthRequired, BackendCaps, ConfigError, Refused, TooLong, Transient
 
 SYSTEM = "你是一个轻小说翻译模型，可以流畅通顺地以日本轻小说的风格将日文翻译成简体中文，并联系上下文正确使用人称代词，不擅自添加原文中没有的代词。"
+SYSTEM_V15 = "你是一个日本二次元领域的日语翻译模型，可以流畅通顺地以日本轻小说/漫画/Galgame的风格将日文翻译成简体中文，并联系上下文正确使用人称代词，不擅自添加原文中没有的代词。"  # Qwen3 v1.5 card
+VERSIONS = ("0.9", "1.0", "1.5", "galtransl-v1")
 GALTRANSL = "你是一个视觉小说翻译模型，可以通顺地使用给定的术语表以指定的风格将日文翻译成简体中文，并联系上下文正确使用人称代词，注意不要混淆使役态和被动态的主语和宾语，不要擅自添加原文中没有的代词，也不要擅自增加或减少换行。"
 
 
@@ -33,7 +35,7 @@ class SakuraConfig:
         url = urlsplit(self.api_base)
         if url.scheme not in ("http", "https") or not url.hostname or url.query or url.fragment or url.username:
             raise ValueError("Sakura API 位址必須是無帳密的 HTTP(S) 位址")
-        if self.version not in ("0.9", "1.0", "galtransl-v1"):
+        if self.version not in VERSIONS:
             raise ValueError("不支援的 Sakura 模型版本")
         if not 0 <= self.retries <= 5 or (self.parallel is not None and self.parallel < 1):
             raise ValueError("重試次數須為 0–5，平行數須大於零")
@@ -89,9 +91,10 @@ class Sakura:
         raw = "\n".join([*prefix, *(w.text for w in works)])
         if self.config.enlarge_kana:
             raw = raw.translate(str.maketrans("ぁぃぅぇぉゃゅょっァィゥェォヵヶャュョッ", "あいうえおやゆよつアイウエオカケヤユヨツ"))
-        system, user = SYSTEM, "将下面的日文文本翻译成中文：\n" + raw
+        base = SYSTEM_V15 if self.config.version == "1.5" else SYSTEM
+        system, user = base, "将下面的日文文本翻译成中文：\n" + raw
         if self.config.version != "0.9" and table:
-            system = GALTRANSL if self.config.version == "galtransl-v1" else SYSTEM
+            system = GALTRANSL if self.config.version == "galtransl-v1" else base
             user = f"根据以下术语表（可以为空）：\n{table}\n将下面的日文文本根据对应关系和备注翻译成中文：\n{raw}"
         return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 

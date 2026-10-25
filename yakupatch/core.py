@@ -17,6 +17,7 @@ from .backends import AuthRequired, BackendError, ConfigError, UsageLimit
 from .backends.codex import CodexConfig
 from .backends.openai_compat import OpenAIConfig
 from .backends.sakura import SakuraConfig
+from .sakura_kit import LocalConfig
 from .backup import Backup
 from .exchange import Store, new_run
 from .extract import project_dir, projects_home
@@ -291,7 +292,8 @@ def config_path() -> Path:
 
 CONFIG_KEYS = {"sakura": set(SakuraConfig.__dataclass_fields__),
                "codex": set(CodexConfig.__dataclass_fields__) | {"privacy_ack"},
-               "openai": set(OpenAIConfig.__dataclass_fields__)}
+               "openai": set(OpenAIConfig.__dataclass_fields__),
+               "sakura_local": set(LocalConfig.__dataclass_fields__)}
 
 
 def load_config() -> dict:
@@ -312,7 +314,7 @@ def save_config(section: str, values: dict) -> None:
     unknown = set(values) - CONFIG_KEYS[section]
     if unknown:
         raise ValueError(f"未知的 {section} 設定：{', '.join(sorted(unknown))}")
-    {"sakura": SakuraConfig, "codex": CodexConfig, "openai": OpenAIConfig}[section](
+    {"sakura": SakuraConfig, "codex": CodexConfig, "openai": OpenAIConfig, "sakura_local": LocalConfig}[section](
         **{k: v for k, v in values.items() if k != "privacy_ack"})
     data = load_config()
     data[section] = values
@@ -325,6 +327,10 @@ def sakura_config() -> SakuraConfig:
 
 def codex_config() -> CodexConfig:
     return CodexConfig(**{k: v for k, v in load_config().get("codex", {}).items() if k != "privacy_ack"})
+
+
+def local_config() -> LocalConfig:
+    return LocalConfig(**load_config().get("sakura_local", {}))
 
 
 def openai_config() -> OpenAIConfig:

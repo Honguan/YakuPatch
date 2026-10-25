@@ -87,7 +87,11 @@ class Gui(unittest.TestCase):
         yes = patch.object(QMessageBox, "question", return_value=QMessageBox.Yes)
         info = patch.object(QMessageBox, "information")
         warn = patch.object(QMessageBox, "warning", side_effect=lambda *a: self.fail(a[2]))
-        for p in (yes, info, warn):
+        from yakupatch import sakura_kit                                  # settings tab: no network or GPU probe
+        catalogue = patch.object(sakura_kit, "catalogue", return_value=[sakura_kit.Model("r", "m.gguf", 2**30, "")])
+        hardware = patch.object(sakura_kit, "hardware", return_value={"gpus": [("GPU", 8 * 2**30)], "ram": 16 * 2**30,
+                                                                       "variant": "cuda"})
+        for p in (yes, info, warn, catalogue, hardware):
             p.start()
             self.addCleanup(p.stop)
         self.win.lib.add(self.game)
@@ -199,7 +203,7 @@ class Gui(unittest.TestCase):
         from yakupatch import dicts
         from yakupatch.gui.settings import SettingsDialog
         with patch.object(SettingsDialog, "_account", return_value=""):
-            dlg = SettingsDialog(self.win, 4)
+            dlg = SettingsDialog(self.win, 5)
         self.assertEqual(dlg.dict_table.rowCount(), len(dicts.SOURCES))
         self.assertEqual(dlg.dict_table.item(0, 2).text(), "查詢後建立")
 
@@ -207,9 +211,9 @@ class Gui(unittest.TestCase):
         from yakupatch.backends import openai_compat
         from yakupatch.gui.settings import SettingsDialog
         with patch.object(SettingsDialog, "_account", return_value=""):
-            SettingsDialog(self.win, 2).save()                        # untouched tab: other sections still save
+            SettingsDialog(self.win, 3).save()                        # untouched tab: other sections still save
             self.assertNotIn("openai", core.load_config())
-            dlg = SettingsDialog(self.win, 2)
+            dlg = SettingsDialog(self.win, 3)
         dlg.oa_base.setText("https://api.example.com/v1")
         dlg.oa_model.setCurrentText("deepseek-chat")
         dlg.oa_key.setText("sk-secret")

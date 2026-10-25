@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QComboBox, QFile
                                QSpinBox, QSplitter, QTableView, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
                                QWidget)
 
-from .. import core
+from .. import core, sakura_kit
 from ..backends import AuthRequired, ConfigError, UsageLimit
 from ..backends.codex import Codex
 from ..backends.openai_compat import OpenAICompat
@@ -80,6 +80,21 @@ class MainWindow(QMainWindow):
                 self.bridge.update_found.emit(*found)
 
         threading.Thread(target=run, daemon=True).start()
+
+    def autostart_sakura(self):
+        """Settings → 本地 Sakura「啟動 YakuPatch 時自動開啟伺服器」; the Sakura API address was saved on first start."""
+        try:
+            cfg = core.local_config()
+        except (TypeError, ValueError):
+            return
+        if not (cfg.autostart and cfg.model):
+            return
+
+        def done(job):
+            self.statusBar().showMessage(tr("本地 Sakura 啟動失敗：{}").format(job.error) if job.error
+                                         else tr("本地 Sakura 已啟動：{}").format(job.result), 10000)
+
+        self.run_bg(lambda job: sakura_kit.SERVER.start(cfg, stop=job.stop), done, tr("啟動 Sakura 伺服器"))
 
     def _update_found(self, tag: str, url: str):
         label = QLabel(tr('有新版本 {}：<a href="{}">前往下載</a>').format(tag, url), openExternalLinks=True)
@@ -929,16 +944,16 @@ class MainWindow(QMainWindow):
         self.action_label.setText(tr("工作已暫停，已完成的批次已保存：{}").format(job.error))
         if isinstance(job.error, AuthRequired) and name == "codex":
             self.action_button.setText(tr("重新登入"))
-            self.fix = lambda: self.open_settings(tab=1)
+            self.fix = lambda: self.open_settings(tab=2)
         elif isinstance(job.error, AuthRequired) and name == "openai":
             self.action_button.setText(tr("開啟設定（API 金鑰）"))
-            self.fix = lambda: self.open_settings(tab=2)
+            self.fix = lambda: self.open_settings(tab=3)
         elif isinstance(job.error, UsageLimit):
             self.action_button.setText(tr("稍後繼續"))
             self.fix = self.resume_job
         else:
             self.action_button.setText(tr("開啟設定（測試連線）"))
-            self.fix = lambda: self.open_settings(tab={"sakura": 0, "codex": 1, "openai": 2}[name])
+            self.fix = lambda: self.open_settings(tab={"sakura": 0, "codex": 2, "openai": 3}[name])
         self.action_box.show()
 
     def _translation_buttons(self):

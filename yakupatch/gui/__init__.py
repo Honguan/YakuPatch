@@ -31,6 +31,7 @@ def main() -> int:
         raise
     _signal(ready, "")
     window.check_update()
+    window.autostart_sakura()
     return app.exec()
 
 

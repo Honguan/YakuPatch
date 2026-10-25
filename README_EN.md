@@ -28,7 +28,7 @@
   * 🔤 **No missing glyphs**: Unity, Godot and Wolf RPG games get a Chinese font automatically.
 
 * **Local or cloud**
-  * 💻 **Sakura**: a local model on your own PC; no network, no cost.
+  * 💻 **Sakura**: a local model on your own PC; no network, no cost. Settings → 本地 Sakura (Local Sakura) downloads llama.cpp and SakuraLLM models (marking the ones that suit your GPU), starts the server, or exports a launcher kit for another PC.
   * ☁️ **Codex** (experimental): translates with the Codex quota of a ChatGPT account.
   * 🔌 **OpenAI-compatible API**: DeepSeek, OpenAI, OpenRouter, Ollama, LM Studio and others; enter the address and key.
 
@@ -59,7 +59,7 @@
 | OS | Windows 10/11, 64-bit |
 | Python | **The portable zip and the install script bundle Python 3.12; you do not need to install Python.** Only running from source needs Python 3.11 or later |
 | Visual C++ Redistributable (x64) | Most PCs already have it. If it is missing, the launcher shows the [download link](https://aka.ms/vs/17/release/vc_redist.x64.exe) |
-| Translation backend (one of) | **Sakura**: a llama-server you start yourself (local or LAN)<br>**Codex** (experimental): a ChatGPT account with Codex quota<br>**OpenAI-compatible API**: an API address and key (a local server needs no key); pick a general chat model |
+| Translation backend (one of) | **Sakura**: downloaded and started inside YakuPatch, or a llama-server you start yourself (local or LAN)<br>**Codex** (experimental): a ChatGPT account with Codex quota<br>**OpenAI-compatible API**: an API address and key (a local server needs no key); pick a general chat model |
 | Network | Needed for the install script, package repair, Codex and cloud APIs. Not needed to translate with a local Sakura server |
 
 ---
@@ -77,7 +77,7 @@
   * The first start can take a few dozen seconds. The console window shows progress dots and closes when the main window opens.
 
 * **Step 2: Set up a backend**
-  * Start your Sakura llama-server, enter its address in Settings and click 測試連線 (Test connection); or sign in to Codex in Settings; or enter an API address, key and model under Settings → OpenAI 相容 (OpenAI-compatible).
+  * Under Settings → 本地 Sakura (Local Sakura), download the recommended model and llama.cpp, then click 啟動伺服器 (Start server) (or start your own llama-server, enter its address in Settings and click 測試連線 (Test connection)); or sign in to Codex in Settings; or enter an API address, key and model under Settings → OpenAI 相容 (OpenAI-compatible).
 
 * **Step 3: Add a game and translate**
   * Add the game folder to the library on the left and follow the step bar at the top: Detect → Language check → Extract → Translate → Apply.
@@ -98,6 +98,11 @@ yakupatch.bat share     "D:\Games\MyGame"
 yakupatch.bat batch     "D:\Games\GameA" "D:\Games\GameB" --backend sakura --apply
 yakupatch.bat import    "D:\Games\MyGame" MyGame.yakupatch.jsonl
 yakupatch.bat restore   "D:\Games\MyGame"
+yakupatch.bat sakura models                 & rem models and what suits this PC
+yakupatch.bat sakura get <model file>
+yakupatch.bat sakura llama
+yakupatch.bat sakura serve
+yakupatch.bat sakura kit <model file> --output D:\SakuraKit --vram 12
 ```
 
 Run `yakupatch.bat --help` for every command and option.
