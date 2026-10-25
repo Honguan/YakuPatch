@@ -321,7 +321,7 @@ class MainWindow(QMainWindow):
         v.addWidget(self.history)
         row = QHBoxLayout()
         for text, slot in ((tr("撤銷此次翻譯"), self.undo_run), (tr("匯出分批檔"), self.export_batches),
-                           (tr("匯入譯文"), self.import_batches)):
+                           (tr("匯入譯文"), self.import_batches), (tr("匯出分享檔"), self.export_share)):
             row.addWidget(QPushButton(text, clicked=slot))
         v.addLayout(row)
         self._backend_note()
@@ -945,13 +945,28 @@ class MainWindow(QMainWindow):
 
     def import_batches(self):
         game, plugin, store = self.current
-        files, _ = QFileDialog.getOpenFileNames(self, tr("選擇譯文檔"), str(store.dir / "batches" / "in"), "JSONL (*.jsonl)")
+        files, _ = QFileDialog.getOpenFileNames(self, tr("選擇譯文檔或分享檔"), str(store.dir / "batches" / "in"),
+                                                "JSONL (*.jsonl)")
         if not files:
             return
-        run, ok, bad = core.import_batches(store, plugin, [Path(f) for f in files])
+        try:
+            run, ok, bad = core.import_batches(store, plugin, [Path(f) for f in files])
+        except ValueError as ex:                     # a share file from another engine
+            QMessageBox.warning(self, "YakuPatch", str(ex))
+            return
         detail = "\n".join(f"{_REASON.get(k, k)}：{v}" for k, v in sorted(bad.items(), key=lambda kv: -kv[1]))
         QMessageBox.information(self, "YakuPatch", tr("匯入紀錄 {}：通過 {} 句，拒絕 {} 句").format(run, ok, sum(bad.values()))
                                 + (f"\n{detail}" if detail else ""))
+
+    def export_share(self):
+        game, plugin, store = self.current
+        name = game.parent.name if game.name.lower() == "www" else game.name
+        path, _ = QFileDialog.getSaveFileName(self, tr("儲存譯文分享檔"), str(Path.home() / f"{name}.yakupatch.jsonl"),
+                                              "JSONL (*.jsonl)")
+        if path:
+            n = core.export_share(store, plugin, Path(path))
+            QMessageBox.information(self, "YakuPatch", tr("已匯出 {} 句譯文到\n{}\n（只含譯文與原文雜湊，不含遊戲原文；"
+                                                          "對方用「匯入譯文」選這個檔即可）").format(n, path))
 
     # ---------- writeback tab ----------
     def preview(self):

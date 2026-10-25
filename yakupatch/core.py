@@ -109,19 +109,26 @@ def export_batches(store: Store, plugin) -> list[Path]:
 
 
 def import_batches(store: Store, plugin, files: list[Path]) -> tuple[str, int, dict]:
+    """Batch files and share files (F15) in one run, so one undo reverts the whole import."""
     run = new_run()
-    ok, bad = exchange.import_batches(store, plugin.control_codes, files, run)
+    shares = [f for f in files if exchange.is_share(f)]
+    ok, bad = exchange.import_batches(store, plugin.control_codes, [f for f in files if f not in shares], run)
+    for path in shares:
+        n, rejected = exchange.import_share(store, plugin.name, plugin.control_codes, path, run)
+        ok += n
+        bad = dict(Counter(bad) + Counter(rejected))
     return run, ok, bad
+
+
+def export_share(store: Store, plugin, path: Path) -> int:
+    return exchange.export_share(store, plugin.name, plugin.control_codes, path)
 
 
 def masked(rec: dict, plugin) -> tuple[str, str, dict]:
     """(source, translation, masks) with control codes as placeholders, for the editor's tags."""
     core, _ = text.normalize(rec["src"])
     src, masks = text.mask(core, plugin.control_codes)
-    dst = text.normalize(rec.get("dst") or "")[0]
-    for key, code in sorted(masks.items(), key=lambda kv: -len(kv[1])):
-        dst = dst.replace(code, key)
-    return src, dst, masks
+    return src, exchange.mask_dst(rec.get("dst") or "", masks), masks
 
 
 def edit(store: Store, plugin, rid: str, dst: str) -> list[str]:

@@ -102,6 +102,30 @@ class EndToEnd(unittest.TestCase):
         ok, bad = exchange.import_batches(self.store, MZ.control_codes, files, exchange.new_run())
         self.assertEqual((ok, bad), (n, {}))
 
+    def test_share_round_trip_without_source_text(self):
+        from yakupatch import core
+        self.translate_all()
+        share = self.store.dir.parent / "game.yakupatch.jsonl"
+        n = core.export_share(self.store, MZ, share)
+        self.assertGreater(n, 0)
+        body = share.read_text("utf-8")
+        self.assertFalse(any(r["src"] in body for r in self.store.records.values() if len(r["src"]) > 2))
+        other_game, home = copy_game("mz_min")                       # a second copy of the same game elsewhere
+        other = Store(project_dir(other_game, MZ, home))
+        extract(other_game, MZ, other)
+        lines = body.splitlines()
+        first = json.loads(lines[1])
+        lines[1] = json.dumps({**first, "sha": "0" * 16}, ensure_ascii=False)   # source changed in this version
+        share.write_text("\n".join(lines) + "\n", "utf-8")
+        run, ok, bad = core.import_batches(other, MZ, [share])
+        self.assertEqual((ok, bad), (n - 1, {"unknown_id": 1}))
+        for rid, rec in other.records.items():
+            if rid != first["id"] and rec["status"] == "translated":
+                self.assertEqual(rec["dst"], self.store.records[rid]["dst"])
+        self.assertEqual(other.undo(run), n - 1)
+        with self.assertRaises(ValueError):
+            exchange.import_share(other, "Wolf RPG", MZ.control_codes, share, "r")
+
     def test_extract_classification(self):
         extract(self.game, MZ, self.store)
         recs = {r["src"]: r for r in self.store.records.values()}
