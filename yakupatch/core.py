@@ -13,7 +13,7 @@ from pathlib import Path
 
 from . import (__version__, dicts, engines, exchange, extract as extraction, pipeline, translate as text, vfs,
                writeback)
-from .backends import AuthRequired, BackendError, ConfigError, UsageLimit
+from .backends import AuthRequired, ConfigError, UsageLimit
 from .backends.codex import CodexConfig
 from .backends.openai_compat import OpenAIConfig
 from .backends.sakura import SakuraConfig
@@ -101,18 +101,25 @@ def batch(paths: list, make_backend, home: Path | None = None, apply=False, limi
             break
         row = {"game": str(path), "status": "ok", "translated": 0, "failed": 0, "files": 0, "error": ""}
         results.append(row)
+
+        def report(stage, **more):          # stage: 提取 / 翻譯 / 寫回, with the game's place in the batch
+            if progress:
+                progress({**more, "stage": stage, "game": row["game"], "index": i, "of": len(paths)})
+
         try:
             game, plugin, store = opener(path) if opener else open_game(path, home)
             row["game"] = str(game)
             if not store.manifest:
+                report("提取")
                 extract(game, plugin, store)
+            report("翻譯")
             result = translate(store, plugin, make_backend(), limit, stop=stop,
-                               progress=progress and (lambda s: progress({**s, "game": row["game"], "index": i,
-                                                                          "of": len(paths)})))
+                               progress=lambda s: report("翻譯", **s))
             row.update(translated=result["translated"], failed=result["failed"])
             if result.get("stopped"):
                 row["status"] = "stopped"
             elif apply:
+                report("寫回")
                 plan = writeback.plan(game, store, plugin)
                 if plan.files:
                     writeback.commit(game, plan)
@@ -122,8 +129,8 @@ def batch(paths: list, make_backend, home: Path | None = None, apply=False, limi
         except (AuthRequired, UsageLimit, ConfigError) as ex:
             row.update(status="paused", error=str(ex))
             break
-        except (BackendError, ValueError, OSError, writeback.GameChanged) as ex:
-            row.update(status="error", error=str(ex))
+        except Exception as ex:             # third-party game files: report this game and go on with the next
+            row.update(status="error", error=str(ex) or type(ex).__name__)
     return results
 
 
@@ -342,23 +349,52 @@ class Library:
 
     def __init__(self, path: Path | None = None):
         self.path = path or projects_home().parent / "library.json"
-        self.games: dict[str, dict] = json.loads(self.path.read_text("utf-8"))["games"] if self.path.exists() else {}
+        data = json.loads(self.path.read_text("utf-8")) if self.path.exists() else {}
+        self.games: dict[str, dict] = data.get("games", {})
+        self.folders: list[str] = data.get("folders", [])      # scanned parent folders, rescanned together
 
     def _save(self) -> None:
-        atomic_write(self.path, json.dumps({"games": self.games}, ensure_ascii=False, indent=1).encode("utf-8"))
+        atomic_write(self.path, json.dumps({"games": self.games, "folders": self.folders}, ensure_ascii=False,
+                                           indent=1).encode("utf-8"))
 
     def add(self, path: Path) -> list[str]:
         game, plugin, _ = open_game(path)
         return self._add([(game, plugin)])
 
-    def scan(self, parent: Path, depth: int = 5) -> list[str]:
-        return self._add(engines.find_game_roots(Path(parent).resolve(), depth))
+    def scan(self, parent: Path, depth: int = 5, progress=None, stop=None) -> list[str]:
+        """Remembers `parent` for rescan(); progress gets {"stage": "掃描", "index", "of", "game"} per game found."""
+        parent = Path(parent).resolve()
+        if str(parent) not in self.folders:
+            self.folders.append(str(parent))
+        if progress:
+            progress({"stage": "尋找遊戲", "game": str(parent)})
+        return self._add(engines.find_game_roots(parent, depth), progress, stop)
 
-    def _add(self, roots) -> list[str]:
-        for game, plugin in roots:
-            self.games.setdefault(str(game), {"engine": plugin.name}).update(_detect(game, plugin))
+    def rescan(self, progress=None, stop=None) -> list[str]:
+        """Scan every remembered folder again; a folder that no longer exists is skipped."""
+        found = []
+        for folder in list(self.folders):
+            if stop is not None and stop.is_set():
+                break
+            if Path(folder).is_dir():
+                found += self.scan(Path(folder), progress=progress, stop=stop)
+        return found
+
+    def forget_folder(self, folder: str) -> None:
+        self.folders = [f for f in self.folders if f != folder]
         self._save()
-        return [str(game) for game, _ in roots]
+
+    def _add(self, roots, progress=None, stop=None) -> list[str]:
+        added = []
+        for i, (game, plugin) in enumerate(roots):
+            if stop is not None and stop.is_set():
+                break
+            if progress:
+                progress({"stage": "掃描", "index": i, "of": len(roots), "game": str(game)})
+            self.games.setdefault(str(game), {"engine": plugin.name}).update(_detect(game, plugin))
+            added.append(str(game))
+        self._save()
+        return added
 
     def redetect(self, key: str) -> None:
         game, plugin, _ = open_game(Path(key))
@@ -366,7 +402,11 @@ class Library:
         self._save()
 
     def remove(self, key: str) -> None:
-        self.games.pop(key, None)
+        self.remove_many([key])
+
+    def remove_many(self, keys) -> None:
+        for key in keys:
+            self.games.pop(key, None)
         self._save()
 
     def row(self, key: str, home: Path | None = None) -> dict:
@@ -394,8 +434,8 @@ class Library:
 def _detect(game: Path, plugin) -> dict:
     try:
         lang, packs = extraction.probe(game, plugin)
-    except (ValueError, OSError) as ex:
-        return {"lang": "", "probe": {}, "unsupported": str(ex)}
+    except Exception as ex:                          # third-party game files: one bad game must not stop a scan
+        return {"lang": "", "probe": {}, "unsupported": str(ex) or type(ex).__name__}
     return {"lang": "packs" if packs else lang["primary"], "probe": lang, "unsupported": ""}
 
 

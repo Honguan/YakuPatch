@@ -114,6 +114,9 @@ class TypeTree(unittest.TestCase):
         ctx.script = lambda obj: ms
         with self.assertRaises(ValueError):                  # callers skip an object on ValueError
             ctx.tree(SimpleNamespace(serialized_type=None))
+        ctx.gen = None                                       # the game's IL2CPP code could not be loaded
+        with self.assertRaises(ValueError):
+            ctx.tree(SimpleNamespace(serialized_type=None))
 
 
 if __name__ == "__main__":

@@ -57,7 +57,10 @@ class _Context:
         self.scripts = {(Path(f.name).name, o.path_id): o for f in self.env.files.values()
                         for o in getattr(f, "objects", {}).values() if o.type.name == "MonoScript"}
         self.gen = TypeTreeGenerator(self.version)
-        self.gen.load_local_game(str(game_dir))
+        try:
+            self.gen.load_local_game(str(game_dir))
+        except AssertionError:                  # e.g. "failed to load il2cpp": scripts without a stored tree are skipped
+            self.gen = None
         self.nodes: dict[tuple, object] = {}
         self.data = data
 
@@ -78,6 +81,8 @@ class _Context:
             return cls, obj.read_typetree(), None
         if ms is None:
             raise ValueError("找不到 MonoScript")
+        if self.gen is None:
+            raise ValueError("無法載入遊戲的程式碼（IL2CPP），無法讀取此腳本")
         key = (ms.m_AssemblyName, ms.m_Namespace, cls)
         if key not in self.nodes:
             from UnityPy.helpers.TypeTreeNode import TypeTreeNode
