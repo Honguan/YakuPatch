@@ -75,7 +75,7 @@
     irm https://raw.githubusercontent.com/Honguan/YakuPatch/main/scripts/install.ps1 | iex
     ```
 
-  * The first start can take a few dozen seconds. The console window shows progress dots and closes when the main window opens.
+  * The first start can take a few dozen seconds. The console window shows every startup step and all output, and stays open while YakuPatch runs; closing it also closes YakuPatch.
 
 * **Step 2: Set up a backend**
   * **Local Sakura (recommended)**: open Settings → 本地 Sakura (Local Sakura), select the model marked 推薦 (Recommended) and click 下載選取的模型 (Download), then 下載最新 llama.cpp (Download llama.cpp), then 啟動伺服器 (Start server). The Sakura address fills in automatically; tick 啟動 YakuPatch 時自動開啟伺服器 (Start with YakuPatch) to skip this next time.

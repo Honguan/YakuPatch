@@ -75,7 +75,7 @@
     irm https://raw.githubusercontent.com/Honguan/YakuPatch/main/scripts/install.ps1 | iex
     ```
 
-  * 第一次啟動可能要等幾十秒，命令視窗會顯示進度點，主視窗出現後自動關閉。
+  * 第一次啟動可能要等幾十秒。命令視窗會顯示每個啟動步驟和所有輸出，並在使用期間保持開啟；關閉它會一併關閉 YakuPatch。
 
 * **第二步：準備翻譯後端**
   * **本地 Sakura（推薦）**：開啟「設定 → 本地 Sakura」，在模型清單選標示「推薦」的模型按「下載選取的模型」，再按「下載最新 llama.cpp」，最後按「啟動伺服器」。Sakura 位址會自動填好；勾選「啟動 YakuPatch 時自動開啟伺服器」之後就不用再手動啟動。

@@ -38,17 +38,14 @@ def wait(cond, timeout=10):
 
 @unittest.skipIf(QApplication is None, "PySide6 not installed")
 class Launch(unittest.TestCase):
-    def test_main_signals_launcher(self):
+    def test_main_shows_window(self):
         from yakupatch import gui
-        ready = os.path.join(copy_game("mz_min")[1].parent, "launch.ready")
-        with patch.dict(os.environ, {"YAKUPATCH_READY": ready}), patch("yakupatch.gui.window.MainWindow") as win,                 patch.object(QApplication, "exec", return_value=0):
+        with patch("yakupatch.gui.window.MainWindow") as win, patch.object(QApplication, "exec", return_value=0):
             self.assertEqual(gui.main(), 0)
-            self.assertEqual(Path(ready).read_text(encoding="utf-8"), "")
+            win.return_value.show.assert_called_once()
             win.side_effect = RuntimeError("boom")
-            os.environ["YAKUPATCH_READY"] = ready
-            with self.assertRaises(RuntimeError):
+            with self.assertRaises(RuntimeError):          # reaches the launcher's console as a traceback
                 gui.main()
-        self.assertIn("RuntimeError: boom", Path(ready).read_text(encoding="utf-8"))
 
 
 @unittest.skipIf(QApplication is None, "PySide6 not installed")

@@ -31,6 +31,8 @@ def main() -> int:
     if not LOCK.is_file():
         print("找不到 requirements.lock，請重新下載 YakuPatch。")
         return 1
+    pins = re.findall(r"^([A-Za-z0-9_.\-]+)==(\S+)", LOCK.read_text(encoding="utf-8"), re.M)
+    print(f"依 {LOCK.name} 檢查 {len(pins)} 個套件：" + "、".join(f"{n} {v}" for n, v in pins))
     found = problems()
     if found:
         print("缺少或版本不符的套件：")
@@ -43,6 +45,7 @@ def main() -> int:
         print("通常是缺少 Microsoft Visual C++ 可轉散發套件（x64），請下載安裝後再啟動：")
         print(VC_REDIST)
         return 2
+    print("套件版本都正確，介面元件可以載入。")
     return 0
 
 
