@@ -8,7 +8,7 @@ from dataclasses import replace
 from collections import Counter
 from pathlib import Path
 
-from . import core, engines, exchange, pipeline, writeback
+from . import core, engines, exchange, pipeline, sakura_kit, writeback
 from .backends import codex, openai_compat
 from .backends.codex import Codex
 from .backends.openai_compat import OpenAICompat, OpenAIConfig
@@ -51,7 +51,7 @@ def main(argv=None) -> int:
             p.add_argument("--dry-run", action="store_true", help="只預估，不連網、不修改專案")
             p.add_argument("--api-base", default="http://127.0.0.1:8080/v1", help="Sakura API 位址")
             p.add_argument("--model", default="", help="模型名稱（預設讀 /models）")
-            p.add_argument("--version", choices=["0.9", "1.0", "galtransl-v1"], default="1.0", help="提示詞版本")
+            p.add_argument("--version", choices=["0.9", "1.0", "1.5", "galtransl-v1"], default="1.0", help="提示詞版本")
             p.add_argument("--timeout", type=float, default=999, help="請求逾時秒數")
             p.add_argument("--parallel", type=int, help="平行數上限（預設讀 /props）")
             p.add_argument("--retries", type=int, default=3, help="連線暫時失敗的重試次數（0–5）")
@@ -82,6 +82,12 @@ def main(argv=None) -> int:
     p.add_argument("action", choices=["login", "logout", "status", "models"])
     p = sub.add_parser("openai", help="OpenAI 相容 API 的金鑰與模型（位址在設定的 openai 區段）")
     p.add_argument("action", choices=["key", "clear", "models"])
+    p = sub.add_parser("sakura", help="本地 Sakura：硬體建議、下載 llama.cpp 與模型、啟動伺服器、匯出啟動包")
+    p.add_argument("action", choices=["hw", "models", "llama", "get", "serve", "kit"])
+    p.add_argument("model", nargs="?", help="模型檔名（get／serve／kit）")
+    p.add_argument("--variant", choices=list(sakura_kit.VARIANTS), help="llama.cpp 版本（預設依本機顯示卡）")
+    p.add_argument("--vram", type=float, help="以這個顯示卡記憶體（GB）標註推薦，例如另一台電腦")
+    p.add_argument("--output", type=Path, help="啟動包資料夾（kit）")
     args = ap.parse_args(argv)
     translate_parser = translate_parsers[args.cmd == "batch"] if args.cmd in ("translate", "batch") else None
     if args.cmd in ("translate", "batch") and args.backend == "sakura":   # only Sakura reads config.json, so a bad file never blocks restore
@@ -113,7 +119,7 @@ def main(argv=None) -> int:
         args = ap.parse_args(argv)
     try:
         return (_codex(args) if args.cmd == "codex" else _openai(args) if args.cmd == "openai"
-                else _batch(args) if args.cmd == "batch" else _run(args))
+                else _sakura(args) if args.cmd == "sakura" else _batch(args) if args.cmd == "batch" else _run(args))
     except KeyboardInterrupt:
         print("已中斷；已完成批次已保存，重跑 translate 即可續跑。")
         return 130
@@ -158,6 +164,57 @@ def _backend(args):
                                             "retries": args.retries, "output_script": args.script,
                                             "temperature": args.temperature, "max_tokens": args.max_tokens}))
     return Sakura(SakuraConfig(**{key: getattr(args, key) for key in SakuraConfig.__dataclass_fields__}))
+
+
+def _sakura(args) -> int:
+    kit, gib = sakura_kit, sakura_kit.GIB
+    hw = kit.hardware()
+    variant = args.variant or hw["variant"]
+
+    def bar(done, total, name=""):
+        print(f"\r{name} {done / gib:.2f}/{total / gib:.2f} GB", end="", flush=True)
+
+    def pick(name):
+        found = [m for m in kit.catalogue() if m.file == name]
+        if not found:
+            raise ValueError(f"模型目錄沒有 {name}，請用 `yakupatch sakura models` 查看檔名")
+        return found[0]
+
+    if args.action == "hw":
+        for name, vram in hw["gpus"] or [("（沒有偵測到獨立顯示卡）", 0)]:
+            print(f"顯示卡：{name}  {vram / gib:.1f} GB")
+        print(f"記憶體：{hw['ram'] / gib:.1f} GB\n建議 llama.cpp 版本：{kit.VARIANTS[hw['variant']]}")
+    elif args.action == "models":
+        vram = args.vram * gib if args.vram else max((v for _, v in hw["gpus"]), default=0)
+        models = kit.catalogue()
+        labels = kit.recommend(models, vram, 0 if args.vram else hw["ram"])
+        have = {p.name for p in kit.installed()}
+        for m in models:
+            print(f"{'*' if m.file in have else ' '} {m.file:45} {m.size / gib:5.1f} GB  提示詞 {m.version:12} "
+                  f"{labels[m.file]}{'（' + m.note + '）' if m.note else ''}")
+        print("* 已下載。推薦依" + (f"顯示卡 {args.vram:g} GB" if args.vram else "本機顯示卡記憶體") + "標註。")
+    elif args.action == "llama":
+        print(f"已安裝：{kit.install_llama(variant, progress=bar)}")
+    elif args.action == "get":
+        print(f"\n已下載：{kit.download_model(pick(args.model), progress=bar)}")
+    elif args.action == "serve":
+        cfg = core.local_config()
+        model = args.model or cfg.model
+        if not model:
+            raise ValueError("請指定模型檔名，或先在設定選擇本地模型")
+        print(f"啟動中：{model}（{'區網可連線' if cfg.lan else '只限本機'}，連接埠 {cfg.port}）…")
+        base = kit.SERVER.start(replace(cfg, model=model))
+        print(f"已啟動：{base}　提示詞版本：{kit.version_of(model)}。按 Ctrl+C 停止。")
+        try:
+            kit.SERVER.process.wait()
+        finally:
+            kit.SERVER.stop()
+    else:
+        if not args.model or not args.output:
+            raise ValueError("kit 需要模型檔名與 --output 資料夾")
+        path = kit.export_kit(args.output, pick(args.model), variant, progress=bar)
+        print(f"\n已匯出啟動包：{path}（在另一台電腦雙擊 start_sakura.bat）")
+    return 0
 
 
 def _openai(args) -> int:

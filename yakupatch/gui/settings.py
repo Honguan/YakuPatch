@@ -1,13 +1,13 @@
-"""Settings dialog (§11.9, I2 scope): Sakura, Codex, OpenAI-compatible, advanced. Values go through core.save_config."""
+"""Settings dialog (§11.9, I2 scope): Sakura, local Sakura server, Codex, OpenAI-compatible, advanced. Values go through core.save_config."""
 import webbrowser
 from dataclasses import fields
 from pathlib import Path
 
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog,
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton,
                                QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
 
-from .. import core, dicts
+from .. import core, dicts, sakura_kit
 from ..backends import codex, openai_compat
 from ..backends.codex import Codex, Credentials
 from ..backends.openai_compat import OpenAICompat, OpenAIConfig
@@ -21,7 +21,7 @@ SAKURA_LABELS = {"api_base": "API 位址", "version": "提示詞版本", "model"
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, window, tab=0):
+    def __init__(self, window, tab=None):
         super().__init__(window)
         self.window_ = window
         self.setWindowTitle(tr("設定"))
@@ -33,10 +33,13 @@ class SettingsDialog(QDialog):
             self.config = {}
         tabs = QTabWidget()
         tabs.addTab(self._sakura(), tr("Sakura"))
+        tabs.addTab(self._local(), tr("本地 Sakura（推薦）"))
         tabs.addTab(self._codex(), tr("Codex（實驗性）"))
         tabs.addTab(self._openai(), tr("OpenAI 相容"))
         tabs.addTab(self._advanced(), tr("進階"))
         tabs.addTab(self._dicts(), tr("字典"))
+        if tab is None:                                   # until Sakura is set up, open the recommended local tab
+            tab = 0 if "sakura" in self.config else 1
         tabs.setCurrentIndex(tab)
         box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Close)
         box.accepted.connect(self.save)
@@ -51,11 +54,13 @@ class SettingsDialog(QDialog):
         form = QFormLayout(w)
         saved = self.config.get("sakura", {})
         self.sakura = {}
+        form.addRow(QLabel(tr("推薦在「本地 Sakura」分頁下載模型並啟動伺服器，位址會自動填好；"
+                              "只有連到自行架設或其他電腦的伺服器時才需要改這裡。"), wordWrap=True))
         for f in fields(SakuraConfig):
             value = saved.get(f.name, f.default)
             if f.name == "version":
                 edit = QComboBox()
-                edit.addItems(["1.0", "0.9", "galtransl-v1"])
+                edit.addItems(["1.0", "1.5", "0.9", "galtransl-v1"])
                 edit.setCurrentText(str(value))
             elif f.type in (bool, "bool"):
                 edit = QCheckBox(checked=bool(value))
@@ -93,6 +98,179 @@ class SettingsDialog(QDialog):
             return tr("已連線：{}，{} 槽").format(backend.model, backend.caps.max_parallel)
 
         self.window_.run_bg(check, lambda job: self.sakura_status.setText(str(job.error or job.result)), tr("測試 Sakura"))
+
+    # ---------- local Sakura server ----------
+    def _local(self):
+        w = QWidget()
+        v = QVBoxLayout(w)
+        saved = self.config.get("sakura_local", {})
+        self.hw = sakura_kit.hardware()
+        gib = sakura_kit.GIB
+        gpu = "、".join(f"{n}（{m / gib:.0f} GB）" for n, m in self.hw["gpus"]) or tr("沒有偵測到獨立顯示卡")
+        v.addWidget(QLabel(tr("本機：{}，記憶體 {:.0f} GB。llama.cpp 建議版本：{}").format(
+            gpu, self.hw["ram"] / gib, sakura_kit.VARIANTS[self.hw["variant"]]), wordWrap=True))
+        self.models = []
+        self.model_table = QTableWidget(0, 4)
+        self.model_table.setHorizontalHeaderLabels([tr(s) for s in ("模型", "大小", "本機推薦", "狀態")])
+        self.model_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.model_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.model_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        v.addWidget(self.model_table)
+        row = QHBoxLayout()
+        row.addWidget(QPushButton(tr("重新整理模型清單"), clicked=self.load_catalogue))
+        row.addWidget(QPushButton(tr("下載選取的模型"), clicked=self.download_model))
+        self.llama_label = QLabel()
+        row.addWidget(self.llama_label, 1)
+        row.addWidget(QPushButton(tr("下載最新 llama.cpp"), clicked=self.download_llama))
+        v.addLayout(row)
+        form = QFormLayout()
+        self.local_model = QComboBox()
+        self.local_port = QSpinBox(minimum=1, maximum=65535, value=int(saved.get("port", 8080)))
+        self.local_slots = QSpinBox(minimum=1, maximum=16, value=int(saved.get("slots", 4)))
+        self.local_ctx = QSpinBox(minimum=512, maximum=32768, singleStep=512, value=int(saved.get("ctx_per_slot", 2048)))
+        self.local_ngl = QSpinBox(minimum=0, maximum=999, value=int(saved.get("gpu_layers", 999)))
+        self.local_lan = QCheckBox(tr("允許區網連線（其他電腦可使用這台的模型；請只在信任的網路開啟）"),
+                                   checked=bool(saved.get("lan")))
+        self.local_auto = QCheckBox(tr("啟動 YakuPatch 時自動開啟伺服器"), checked=bool(saved.get("autostart")))
+        for label, widget in ((tr("使用的模型（已下載）"), self.local_model), (tr("連接埠"), self.local_port),
+                              (tr("平行槽數"), self.local_slots), (tr("每槽 context"), self.local_ctx),
+                              (tr("GPU 層數（999＝全部）"), self.local_ngl), ("", self.local_lan), ("", self.local_auto)):
+            form.addRow(label, widget)
+        v.addLayout(form)
+        row = QHBoxLayout()
+        self.server_status = QLabel(tr("● 執行中") if sakura_kit.SERVER.running else tr("○ 未啟動"))
+        row.addWidget(QPushButton(tr("啟動伺服器"), clicked=self.start_server))
+        row.addWidget(QPushButton(tr("停止伺服器"), clicked=self.stop_server))
+        row.addWidget(self.server_status, 1)
+        v.addLayout(row)
+        row = QHBoxLayout()
+        self.kit_vram = QSpinBox(minimum=0, maximum=192, suffix=" GB",
+                                 value=round(max((m for _, m in self.hw["gpus"]), default=0) / gib))
+        self.kit_vram.valueChanged.connect(self._fill_models)
+        self.kit_variant = QComboBox()
+        for key, name in sakura_kit.VARIANTS.items():
+            self.kit_variant.addItem(tr(name), key)
+        row.addWidget(QLabel(tr("其他電腦：顯示卡記憶體")))
+        row.addWidget(self.kit_vram)
+        row.addWidget(self.kit_variant)
+        row.addWidget(QPushButton(tr("匯出啟動包…"), clicked=self.export_kit))
+        v.addLayout(row)
+        self._fill_installed(saved.get("model", ""))
+        self._fill_models()
+        self.load_catalogue()
+        return w
+
+    def _fill_installed(self, current=""):
+        self.local_model.clear()
+        for path in sakura_kit.installed():
+            self.local_model.addItem(path.name)
+        if current:
+            self.local_model.setCurrentText(current)
+        exe = sakura_kit.installed_llama()
+        self.llama_label.setText(tr("llama.cpp：{}").format(exe.name if exe else tr("尚未下載")))
+
+    def _fill_models(self):
+        """The recommendation column follows this PC, or the VRAM typed for another PC's kit."""
+        gib = sakura_kit.GIB
+        local = max((m for _, m in self.hw["gpus"]), default=0)
+        target = self.kit_vram.value() * gib
+        here = abs(target - local) < gib
+        labels = sakura_kit.recommend(self.models, target, self.hw["ram"] if here else 0)
+        self.model_table.setHorizontalHeaderItem(2, QTableWidgetItem(
+            tr("本機推薦") if here else tr("{} GB 推薦").format(self.kit_vram.value())))
+        have = {p.name for p in sakura_kit.installed()}
+        self.model_table.setRowCount(len(self.models))
+        for i, m in enumerate(self.models):
+            for col, text in enumerate((m.file + (f"（{tr(m.note)}）" if m.note else ""), f"{m.size / gib:.1f} GB",
+                                        tr(labels[m.file]), tr("已下載") if m.file in have else "")):
+                self.model_table.setItem(i, col, QTableWidgetItem(text))
+
+    def load_catalogue(self):
+        def done(job):
+            if job.error:
+                self.server_status.setText(tr("無法取得模型清單：{}").format(job.error))
+                return
+            self.models = job.result
+            self._fill_models()
+
+        self.window_.run_bg(lambda job: sakura_kit.catalogue(), done, tr("取得 Sakura 模型清單"))
+
+    def _selected_model(self):
+        rows = {i.row() for i in self.model_table.selectedIndexes()}
+        if len(rows) != 1:
+            QMessageBox.information(self, "YakuPatch", tr("請先在清單選一個模型"))
+            return None
+        return self.models[rows.pop()]
+
+    def _download(self, label, fn):
+        def work(job):
+            return fn(lambda d, t, *_: job.report({"translated": d >> 20, "failed": 0, "total": t >> 20}), job.stop)
+
+        def done(job):
+            if job.error:
+                QMessageBox.warning(self, "YakuPatch", str(job.error))
+            self._fill_installed(self.local_model.currentText())
+            self._fill_models()
+
+        self.window_.run_bg(work, done, label)
+
+    def download_model(self):
+        model = self._selected_model()
+        if model:
+            self._download(tr("下載 {}（MB）").format(model.file),
+                           lambda progress, stop: sakura_kit.download_model(model, progress=progress, stop=stop))
+
+    def download_llama(self):
+        variant = self.hw["variant"]
+        self._download(tr("下載 llama.cpp（MB）"),
+                       lambda progress, stop: sakura_kit.install_llama(variant, progress=progress, stop=stop))
+
+    def local_values(self) -> dict:
+        return {"model": self.local_model.currentText(), "port": self.local_port.value(),
+                "gpu_layers": self.local_ngl.value(), "slots": self.local_slots.value(),
+                "ctx_per_slot": self.local_ctx.value(), "lan": self.local_lan.isChecked(),
+                "autostart": self.local_auto.isChecked()}
+
+    def start_server(self):
+        try:
+            cfg = sakura_kit.LocalConfig(**self.local_values())
+        except (TypeError, ValueError) as ex:
+            self.server_status.setText(str(ex))
+            return
+        if not cfg.model:
+            self.server_status.setText(tr("請先下載並選擇模型"))
+            return
+        self.server_status.setText(tr("啟動中…（大模型載入可能要一分鐘）"))
+
+        def done(job):
+            if job.error:
+                self.server_status.setText(tr("○ 啟動失敗：{}").format(job.error))
+                return
+            self.sakura["api_base"].setText(job.result)               # the Sakura tab now points at this server
+            self.sakura["version"].setCurrentText(sakura_kit.version_of(cfg.model))
+            self.server_status.setText(tr("● 執行中：{}（{}）").format(job.result, cfg.model))
+            try:
+                core.save_config("sakura_local", self.local_values())
+                core.save_config("sakura", self.sakura_values())
+            except (TypeError, ValueError) as ex:
+                QMessageBox.warning(self, "YakuPatch", tr("設定未儲存：{}").format(ex))
+
+        self.window_.run_bg(lambda job: sakura_kit.SERVER.start(cfg, stop=job.stop), done, tr("啟動 Sakura 伺服器"))
+
+    def stop_server(self):
+        sakura_kit.SERVER.stop()
+        self.server_status.setText(tr("○ 已停止"))
+
+    def export_kit(self):
+        model = self._selected_model()
+        if not model:
+            return
+        folder = QFileDialog.getExistingDirectory(self, tr("選擇啟動包的存放資料夾（建議空資料夾）"))
+        if not folder:
+            return
+        variant = self.kit_variant.currentData()
+        self._download(tr("匯出 Sakura 啟動包（MB）"), lambda progress, stop: sakura_kit.export_kit(
+            Path(folder), model, variant, progress=progress, stop=stop))
 
     # ---------- Codex ----------
     def _codex(self):
@@ -339,6 +517,7 @@ class SettingsDialog(QDialog):
         try:
             core.save_config("sakura", self.sakura_values())
             core.save_config("codex", self.codex_values())
+            core.save_config("sakura_local", self.local_values())
             values = self.openai_values()
             if values["api_base"] or "openai" in self.config:      # an untouched tab needs no address
                 core.save_config("openai", values)
