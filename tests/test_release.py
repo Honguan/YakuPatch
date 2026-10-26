@@ -35,12 +35,13 @@ class Release(unittest.TestCase):
     def test_newer_release(self):
         def answer(tag):
             body = io.BytesIO(json.dumps({"tag_name": tag, "html_url": "https://x/r"}).encode())
-            return mock.patch("urllib.request.urlopen", return_value=mock.MagicMock(__enter__=lambda s: body))
+            return mock.patch("urllib.request.OpenerDirector.open", return_value=mock.MagicMock(__enter__=lambda s: body))
         with answer("v1.2.0"):
             self.assertEqual(core.newer_release("1.1.9"), ("v1.2.0", "https://x/r"))
-        with answer("v1.0.0"):
-            self.assertIsNone(core.newer_release("1.0.0"))
-        with mock.patch("urllib.request.urlopen", side_effect=OSError("offline")):
+        with answer("v1.0.0"), mock.patch("urllib.request.getproxies") as registry:
+            self.assertIsNone(core.newer_release("1.0.0", proxies={}))
+            registry.assert_not_called()                  # proxies read by the caller are used as given
+        with mock.patch("urllib.request.OpenerDirector.open", side_effect=OSError("offline")):
             self.assertIsNone(core.newer_release("1.0.0"))
 
 

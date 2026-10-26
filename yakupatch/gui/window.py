@@ -3,6 +3,7 @@
 Long work runs on core.JobQueue threads; results and Store changes come back through Qt signals."""
 import threading
 import time
+import urllib.request
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
@@ -118,8 +119,9 @@ class MainWindow(QMainWindow):
 
     def check_update(self):
         """Look for a newer release in the background; only a status-bar link, nothing is downloaded."""
+        proxies = urllib.request.getproxies()       # here, not on the thread: see core.newer_release
         def run():
-            found = core.newer_release()
+            found = core.newer_release(proxies=proxies)
             if found:
                 self.bridge.update_found.emit(*found)
 

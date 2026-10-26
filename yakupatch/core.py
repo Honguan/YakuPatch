@@ -26,12 +26,15 @@ from .fsutil import atomic_write
 RELEASES = "https://api.github.com/repos/Honguan/YakuPatch/releases/latest"
 
 
-def newer_release(current: str = __version__, timeout: float = 5) -> tuple[str, str] | None:
+def newer_release(current: str = __version__, timeout: float = 5, proxies: dict | None = None) -> tuple[str, str] | None:
     """GUI startup check (§12.1): (tag, page) of a GitHub release newer than `current`; None when up to date,
-    offline or there is no release. Only tells; never downloads."""
+    offline or there is no release. Only tells; never downloads.
+    `proxies` from urllib.request.getproxies() on the GUI thread: reading the Windows registry for them on a
+    worker thread has crashed the process (segfault in getproxies_registry)."""
     try:
         req = urllib.request.Request(RELEASES, headers={"Accept": "application/vnd.github+json"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        handler = urllib.request.ProxyHandler(urllib.request.getproxies() if proxies is None else proxies)
+        with urllib.request.build_opener(handler).open(req, timeout=timeout) as r:
             data = json.load(r)
     except (OSError, ValueError):
         return None
