@@ -53,6 +53,8 @@ class _Context:
         self.env = UnityPy.Environment()
         for p in _files(game_dir):                  # from bytes: an open file could not be replaced on Windows
             self.env.load_file(p.read_bytes(), name=str(p))
+        if not self.env.objects:
+            raise ValueError("讀不到任何 Unity 資源（檔案可能已加密或使用未支援的格式）")
         self.version = self.env.objects[0].assets_file.unity_version
         self.scripts = {(Path(f.name).name, o.path_id): o for f in self.env.files.values()
                         for o in getattr(f, "objects", {}).values() if o.type.name == "MonoScript"}

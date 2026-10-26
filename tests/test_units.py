@@ -41,6 +41,11 @@ class Units(unittest.TestCase):
         for raw in ["\ufeff{\"a\":\"あ\"}".encode("utf-8"), "あいう".encode("cp932"), "x".encode("utf-16")]:
             text, info = decode(raw)
             self.assertEqual(encode(text, info), raw)
+        raw = "「早く".encode("cp932") + b"\x81/\x81/" + "」".encode("cp932")   # bytes no codec accepts
+        text, info = decode(raw, "utf-8")
+        self.assertEqual((info["encoding"], text[:3]), ("cp932", "「早く"))
+        self.assertEqual(encode(text, info), raw)
+        self.assertEqual(encode(text.replace("早く", "快點"), info), "「快點".encode("cp932") + raw[6:])
 
     def test_safe_path(self):
         root = copy_game("mz_min")[0]

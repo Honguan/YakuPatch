@@ -1,6 +1,22 @@
 """E4 Decoder and the matching encoder (PROJECT_PLAN §8.1)."""
 import codecs
 
+RAW = "yakupatch-raw"         # error handler: a byte no codec accepts round-trips as U+F700 + byte (private use)
+
+
+def _raw_decode(e: UnicodeDecodeError):
+    return chr(0xF700 + e.object[e.start]), e.start + 1
+
+
+def _raw_encode(e: UnicodeEncodeError):
+    ch = e.object[e.start]
+    if 0xF700 <= ord(ch) <= 0xF7FF:
+        return bytes([ord(ch) - 0xF700]), e.start + 1
+    raise e
+
+
+codecs.register_error(RAW, lambda e: _raw_decode(e) if isinstance(e, UnicodeDecodeError) else _raw_encode(e))
+
 _BOMS = [
     (codecs.BOM_UTF8, "utf-8"),
     (codecs.BOM_UTF16_LE, "utf-16-le"),
@@ -16,14 +32,21 @@ def decode(data: bytes, default: str = "cp932") -> tuple[str, dict]:
     try:
         return data.decode("utf-8"), _info("utf-8", False, data.decode("utf-8"))
     except UnicodeDecodeError:
-        # shortcut: no charset-normalizer cross-check yet; add it when CP932 engines land (I4).
+        pass
+    try:
         text = data.decode(default)
         return text, _info(default, False, text)
+    except UnicodeDecodeError:
+        pass
+    # Neither codec takes every byte (e.g. a game's own 0x81 0x2F): the one with fewer bad bytes wins, kept exact.
+    enc = min(dict.fromkeys([default, "cp932", "utf-8"]), key=lambda c: data.decode(c, "replace").count("\ufffd"))
+    text = data.decode(enc, RAW)
+    return text, _info(enc, False, text)
 
 
 def encode(text: str, info: dict) -> bytes:
     bom = dict((enc, bom) for bom, enc in _BOMS)[info["encoding"]] if info["bom"] else b""
-    return bom + text.encode(info["encoding"])
+    return bom + text.encode(info["encoding"], RAW)
 
 
 def cp932_substitutes(chars: set[str], used: set[str]) -> dict[str, str]:
