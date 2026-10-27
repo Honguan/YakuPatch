@@ -67,15 +67,19 @@ def read_game(game_dir: Path, plugin: EnginePlugin) -> tuple[dict, list[tuple[st
 
 
 def probe(game_dir: Path, plugin: EnginePlugin, segments: list[tuple[str, Segment]] | None = None) -> tuple[dict, list]:
-    if segments is None:
-        segments = read_game(game_dir, plugin)[1]
-    result = language_gate([s for _, s in segments])                     # L1
     packs = plugin.language_packs(game_dir)
+    if segments is None:
+        segments = [] if packs else read_game(game_dir, plugin)[1]
+    result = language_gate([s for _, s in segments])                     # L1
     result["packs"] = [p.path for p in packs]
     return result, packs
 
 
 def extract(game_dir: Path, plugin: EnginePlugin, store: Store, force: bool = False) -> dict:
+    packs = plugin.language_packs(game_dir)
+    if packs and not force:
+        lang = {**language_gate([]), "packs": [p.path for p in packs]}
+        raise LanguageGateStop(lang, packs)
     files, segments = read_game(game_dir, plugin)
     lang, packs = probe(game_dir, plugin, segments)
     if not force and (lang["primary"].startswith("zh") or packs):

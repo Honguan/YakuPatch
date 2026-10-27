@@ -527,6 +527,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(tr("已加入或更新 {} 款遊戲，其中不支援 {} 款（游標移到遊戲上可看原因）").format(
                 len(job.result), bad), 8000)
         self.refresh_library()
+        self._refresh_counts()
 
     def remove_where(self, match, what):
         keys = [r["key"] for r in self.rows.values() if match(r)]
@@ -585,10 +586,20 @@ class MainWindow(QMainWindow):
         menu.addAction(tr("重新偵測"), lambda: self.run_bg(lambda job: self.lib.redetect(key), self._library_done_quiet,
                                                        tr("重新偵測")))
         menu.addAction(tr("移除（只移除專案，不刪遊戲）"), lambda: self.remove_game(key))
+        mark = menu.addAction(tr("遊戲內可切換中文（不需翻譯）"))
+        mark.setCheckable(True)
+        mark.setChecked(bool(self.lib.games[key].get("builtin_chinese")))
+        mark.toggled.connect(lambda checked: self.set_builtin_chinese(key, checked))
         menu.addSeparator()
         menu.addAction(tr("批次翻譯選取的遊戲（{} 款）").format(len(self.lib_list.selectedItems()) or 1),
                        lambda: self.batch_translate())
         menu.exec(self.lib_list.mapToGlobal(pos))
+
+    def set_builtin_chinese(self, key, enabled):
+        self.lib.set_builtin_chinese(key, enabled)
+        self.refresh_library()
+        if self.key == key:
+            self._refresh_counts()
 
     def batch_translate(self, apply=None):
         """F16: extract → translate → optionally apply each selected game, in one queued job.
@@ -598,6 +609,10 @@ class MainWindow(QMainWindow):
             keys = [self.lib_list.currentItem().data(Qt.UserRole)]
         if not keys:
             QMessageBox.information(self, "YakuPatch", tr("請先在左側選取要翻譯的遊戲（可按 Ctrl／Shift 多選）"))
+            return
+        keys = [k for k in keys if not self.lib.row(k, self.home)["no_need"]]
+        if not keys:
+            QMessageBox.information(self, "YakuPatch", tr("選取的遊戲不需翻譯，可在遊戲內切換中文"))
             return
         try:
             backend, name = self.make_backend()
@@ -689,6 +704,7 @@ class MainWindow(QMainWindow):
     def _library_done_quiet(self, job):
         self._error(job, tr("偵測失敗"))
         self.refresh_library()
+        self._refresh_counts()
 
     def remove_game(self, key):
         if QMessageBox.question(self, "YakuPatch", tr("從遊戲庫移除？遊戲檔案與翻譯資料都會保留。")) != QMessageBox.Yes:
@@ -750,6 +766,7 @@ class MainWindow(QMainWindow):
         game, plugin, store = self.current
         c = core.counts(store)
         entry = self.lib.games.get(self.key, {})
+        row = self.lib.row(self.key, self.home)
         probe = store.manifest.get("language_probe") or entry.get("probe") or {}
         extracted, applied = bool(store.manifest), bool(core.Backup(game).files)
         todo = c["translated"] + c["reviewed"] + c["pending"] + c["failed"]
@@ -757,7 +774,7 @@ class MainWindow(QMainWindow):
         self.stages.set("整體", c["translated"] + c["reviewed"], todo, tr("已翻 {}／可翻 {}（{}%）").format(
             c["translated"] + c["reviewed"], todo, pct))
         self.title.setText(f"{game.name if game.name.lower() != 'www' else game.parent.name}    "
-                           f"{plugin.name}  [{core.LANG.get(entry.get('lang'), entry.get('lang', '—'))}]")
+                           f"{plugin.name}  [{row['lang']}]")
         marks = [True, bool(probe), extracted, extracted and c["pending"] + c["failed"] == 0 and todo > 0, applied]
         for b, name, ok, i in zip(self.step_buttons, STEPS, marks, range(5)):
             b.setText(tr(name) + (" ✓" if ok else f" {pct}%" if i == 3 and extracted else ""))
@@ -766,6 +783,15 @@ class MainWindow(QMainWindow):
             game, plugin.name, plugin.detect(game), len(store.manifest.get("files", {})), c["total"], c["pending"],
             c["translated"], c["reviewed"], c["failed"], c["skip"], c["uncertain"]))
         zh = probe.get("primary", "").startswith("zh") or bool(probe.get("packs"))
+        zh = zh or row["no_need"]
+        for i in (1, 2, 3):
+            self.tabs.setTabEnabled(i, not zh)
+        self.preview_button.setEnabled(not zh)
+        if zh:
+            self.plan = None
+            self.apply_button.setEnabled(False)
+            if self.tabs.currentIndex() in (1, 2, 3):
+                self.tabs.setCurrentIndex(0)
         if probe:
             head = (tr("語言預檢：{} ✓ 可以翻譯") if not zh else tr("語言預檢：已是{}，不需翻譯")).format(
                 _LANG.get(probe["primary"], probe["primary"]))
@@ -774,9 +800,13 @@ class MainWindow(QMainWindow):
                 "、".join(probe.get("packs", [])) or tr("無")))
         else:
             self.lang_card.setText(tr("語言預檢：提取時進行"))
-        self.force_button.setVisible(zh and not extracted)
+        if row["no_need"]:
+            self.lang_card.setText(tr("不需翻譯：{}\n請在遊戲設定切換中文。").format(row["reason"]))
+        self.force_button.setVisible(False)
         self.primary.setText(tr("開始提取") if not extracted else tr("開始翻譯") if c["pending"] + c["failed"] else
                              tr("寫回遊戲") if not applied else tr("啟動遊戲"))
+        if zh:
+            self.primary.setText(tr("啟動遊戲"))
         self.count_label.setText(tr("{} 句").format(self.proxy.rowCount()))
         self.load_history()
 
@@ -793,6 +823,9 @@ class MainWindow(QMainWindow):
             self.launch()
 
     def extract(self, force=False):
+        if self.lib.row(self.key, self.home)["no_need"]:
+            QMessageBox.information(self, "YakuPatch", tr("遊戲內已有中文，不需翻譯"))
+            return
         game, plugin, store = self.current
 
         def done(job):
@@ -1044,6 +1077,9 @@ class MainWindow(QMainWindow):
     def start_translation(self, only=None, fresh=False):
         if not self.key:
             return
+        if self.lib.row(self.key, self.home)["no_need"]:
+            QMessageBox.information(self, "YakuPatch", tr("遊戲內已有中文，不需翻譯"))
+            return
         limit = None
         if only is None:
             limit, only, fresh = self._scope()
@@ -1226,9 +1262,14 @@ class MainWindow(QMainWindow):
 
     # ---------- writeback tab ----------
     def preview(self):
+        if self.lib.row(self.key, self.home)["no_need"]:
+            return
         game, plugin, store = self.current
+        key = self.key
 
         def done(job):
+            if self.key != key or self.lib.row(key, self.home)["no_need"]:
+                return
             if self._error(job, tr("無法預覽")):
                 return
             self.plan = job.result
@@ -1254,7 +1295,7 @@ class MainWindow(QMainWindow):
         self.run_bg(lambda job: core.preview(game, store, plugin), done, tr("寫回預覽"))
 
     def apply(self):
-        if not self.plan:
+        if not self.plan or self.lib.row(self.key, self.home)["no_need"]:
             return
         game = self.current[0]
         msg = tr("將修改 {} 個檔案，原檔會先備份到 _yakupatch_backup/。確定寫回？").format(len(self.plan.files))

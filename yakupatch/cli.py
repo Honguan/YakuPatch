@@ -14,7 +14,7 @@ from .backends.codex import Codex
 from .backends.openai_compat import OpenAICompat, OpenAIConfig
 from .backends.sakura import Sakura, SakuraConfig
 from .backup import Backup
-from .extract import LanguageGateStop, extract, projects_home
+from .extract import LanguageGateStop, projects_home
 from .exchange import Store
 
 _LANG = {"ja": "日文", "mixed": "混合（部分已是中文）", "zh-Hans": "簡體中文", "zh-Hant": "繁體中文",
@@ -87,7 +87,7 @@ def main(argv=None) -> int:
     p.add_argument("model", nargs="?", help="模型檔名（get／serve／kit）")
     p.add_argument("--variant", choices=list(sakura_kit.VARIANTS), help="llama.cpp 版本（預設依本機顯示卡）")
     p.add_argument("--vram", type=float, help="以這個顯示卡記憶體（GB）標註推薦，例如另一台電腦")
-    p.add_argument("--output", type=Path, help="啟動包資料夾（kit）")
+    p.add_argument("--output", type=Path, help="簡易啟動包 ZIP（kit；首次啟動時才下載 llama.cpp 與模型）")
     args = ap.parse_args(argv)
     translate_parser = translate_parsers[args.cmd == "batch"] if args.cmd in ("translate", "batch") else None
     if args.cmd in ("translate", "batch") and args.backend == "sakura":   # only Sakura reads config.json, so a bad file never blocks restore
@@ -211,9 +211,9 @@ def _sakura(args) -> int:
             kit.SERVER.stop()
     else:
         if not args.model or not args.output:
-            raise ValueError("kit 需要模型檔名與 --output 資料夾")
-        path = kit.export_kit(args.output, pick(args.model), variant, progress=bar)
-        print(f"\n已匯出啟動包：{path}（在另一台電腦雙擊 start_sakura.bat）")
+            raise ValueError("kit 需要模型檔名與 --output ZIP 檔案")
+        path = kit.export_kit(args.output, pick(args.model), variant)
+        print(f"\n已匯出簡易啟動包：{path}（解壓縮後雙擊 start_sakura.bat，首次啟動會下載 llama.cpp 與模型）")
     return 0
 
 
@@ -292,7 +292,7 @@ def _run(args) -> int:
         print(f"引擎：{plugin.name}\n遊戲資料夾：{game}\n專案資料夾：{store.dir}")
     elif args.cmd == "extract":
         try:
-            probe = extract(game, plugin, store, force=args.force)
+            probe = core.extract(game, plugin, store, force=args.force)
         except LanguageGateStop as stop:
             p = stop.probe
             print(f"語言預檢：{_LANG.get(p['primary'], p['primary'])}，不需翻譯。"
@@ -309,6 +309,8 @@ def _run(args) -> int:
     elif args.cmd == "translate":
         if not store.manifest:
             raise ValueError("尚未提取文本，請先執行 extract")
+        if core.translation_blocked(game, plugin, store):
+            raise ValueError("遊戲內已有中文，不需翻譯")
         pipeline.select(store, args.limit)
         backend = _backend(args)
         if not args.dry_run:

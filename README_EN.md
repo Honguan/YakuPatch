@@ -80,12 +80,14 @@
 
 * **Step 2: Set up a backend**
   * **Local Sakura (recommended)**: open Settings → 本地 Sakura (Local Sakura), select the model marked 推薦 (Recommended) and click 下載選取的模型 (Download), then 下載最新 llama.cpp (Download llama.cpp), then 啟動伺服器 (Start server). The Sakura address fills in automatically; tick 啟動 YakuPatch 時自動開啟伺服器 (Start with YakuPatch) to skip this next time.
-  * Local Sakura and exported kits default to 8 slots, 2048 context per slot, Q8 K/V cache, batch 2048, micro-batch 512, and Flash Attention. Saved slot and context settings are preserved. If memory is insufficient, lower the slot count under 本地 Sakura; for exported kits, edit `-np` and `-c` (slots × context per slot) in `start_sakura.bat`. VRAM recommendations are estimates; actual usage depends on the model and hardware.
-  * **Run the model on another PC**: in 本地 Sakura, enter that PC's VRAM, select a model and click 匯出啟動包… (Export kit). Copy the folder over, double-click `start_sakura.bat`, then on this PC enter `http://<that PC's IP>:8080/v1` under Settings → Sakura and click 測試連線 (Test connection).
+  * Local Sakura and exported kits default to 8 slots, 2048 context per slot, Q8 K/V cache, batch 2048, micro-batch 512, and Flash Attention. Saved slot and context settings are preserved. If memory is insufficient, lower the slot count under 本地 Sakura; for exported kits, edit `-np` and `-c` (slots × context per slot) in the `args` array of `kit.json`. VRAM recommendations are estimates; actual usage depends on the model and hardware.
+  * To delete a model, stop the local server, select it under 使用的模型（已下載） (Downloaded model), click 刪除模型… (Delete model), and confirm. Deleting the saved startup model also clears that selection and disables autostart. You can download the model again later.
+  * **Run the model on another PC**: in 本地 Sakura, enter that PC's VRAM, select a model and click 匯出簡易啟動包 ZIP… (Export lightweight kit ZIP). The ZIP contains only the selected model's metadata and launcher scripts, with no llama.cpp or model binaries. Copy it to the other PC, extract it, and double-click `start_sakura.bat`. The first launch downloads and verifies the files; later launches reuse them. Python and YakuPatch are not required. On this PC, enter `http://<that PC's IP>:8080/v1` under Settings → Sakura and click 測試連線 (Test connection).
   * **Other backends**: sign in under Settings → Codex, or enter an API address, key and model under Settings → OpenAI 相容 (OpenAI-compatible).
 
 * **Step 3: Add a game and translate**
   * Add the game folder to the library on the left and follow the step bar at the top: Detect → Language check → Extract → Translate → Apply.
+  * Games detected as Chinese or containing Chinese scenario packs are marked 不需翻譯 (No translation needed) and skipped in batches. For encrypted games whose Chinese option you have confirmed in-game, right-click the library entry and select 遊戲內可切換中文（不需翻譯）. The reversible flag survives rescans. Translation and applying patches are disabled in the GUI, while restoring existing changes remains available.
   * To restore the game, click 還原遊戲 (Restore game).
 
 > The interface is in Traditional Chinese.

@@ -1,5 +1,6 @@
 import hashlib
 import io
+import json
 import tempfile
 import threading
 import unittest
@@ -43,6 +44,37 @@ class SakuraKit(unittest.TestCase):
         self.assertEqual(kit.version_of("sakura-7b-qwen2.5-v1.0-q6k.gguf"), "1.0")
         system = Sakura(SakuraConfig(version="1.5")).messages([], {}, context=False)[0]["content"]
         self.assertIn("二次元", system)
+
+    def test_delete_only_an_installed_model(self):
+        models = self.tmp / "models"
+        models.mkdir()
+        selected, other = models / "m.gguf", models / "other.gguf"
+        selected.write_bytes(b"selected")
+        other.write_bytes(b"other")
+        outside = self.tmp / "outside.gguf"
+        outside.write_bytes(b"outside")
+        with patch.object(kit, "home", return_value=self.tmp):
+            for name in ("../outside.gguf", str(outside), "missing.gguf"):
+                with self.subTest(name=name), self.assertRaises(ValueError):
+                    kit.delete_model(name)
+            kit.delete_model(selected.name)
+            self.assertEqual(kit.installed(), [other])
+        self.assertEqual(other.read_bytes(), b"other")
+        self.assertEqual(outside.read_bytes(), b"outside")
+
+    def test_delete_model_running_and_file_errors(self):
+        from types import SimpleNamespace
+        models = self.tmp / "models"
+        models.mkdir()
+        selected = models / "m.gguf"
+        selected.write_bytes(b"model")
+        with patch.object(kit, "home", return_value=self.tmp):
+            with patch.object(kit.SERVER, "process", SimpleNamespace(poll=lambda: None)), self.assertRaises(ValueError):
+                kit.delete_model(selected.name)
+            self.assertTrue(selected.exists())
+            with patch.object(Path, "unlink", side_effect=PermissionError("in use")), self.assertRaises(OSError):
+                kit.delete_model(selected.name)
+        self.assertEqual(selected.read_bytes(), b"model")
 
     def test_download_resumes_and_verifies(self):
         data = b"x" * 3000
@@ -129,23 +161,53 @@ class SakuraKit(unittest.TestCase):
                 self.assertEqual(args[args.index(flag) + 1], value, flag)
 
     def test_export_kit_uses_server_defaults(self):
-        dest = self.tmp / "portable kit"
-        llama = dest / "llama"
-        llama.mkdir(parents=True)
-        (llama / "llama-server.exe").touch()
+        dest = self.tmp / "portable kit.zip"
         local = self.tmp / "models" / "model with spaces.gguf"
         local.parent.mkdir()
         local.write_bytes(b"model")
         with patch.object(kit, "home", return_value=self.tmp), \
-                patch.object(kit, "install_llama", return_value=llama):
+                patch.object(kit, "install_llama") as install, patch.object(kit, "download_model") as download, \
+                patch.object(kit, "urlopen") as network:
             kit.export_kit(dest, kit.Model("repo", local.name, 5, ""), "cuda", port=8081)
-        bat = (dest / "start_sakura.bat").read_bytes()
+            install.assert_not_called()
+            download.assert_not_called()
+            network.assert_not_called()
+        with zipfile.ZipFile(dest) as z:
+            self.assertEqual(set(z.namelist()), {"kit.json", "README.txt", "start_sakura.bat", "start_sakura.ps1"})
+            manifest = json.loads(z.read("kit.json"))
+            bat = z.read("start_sakura.bat")
+            self.assertIn(b"Install-SakuraKit", z.read("start_sakura.ps1"))
         self.assertEqual(bat.count(b"\n"), bat.count(b"\r\n"))
-        command = bat.decode("utf-8")
-        for option in ("-np 8", "-c 16384", "-ctk q8_0", "-ctv q8_0", "-b 2048", "-ub 512", "-fa on",
-                       "--host 0.0.0.0", "--port 8081", '"models\\model with spaces.gguf"'):
-            self.assertIn(option, command)
-        self.assertEqual((dest / "models" / local.name).read_bytes(), b"model")
+        args = manifest["args"]
+        for flag, value in {"-np": "8", "-c": "16384", "-ctk": "q8_0", "-ctv": "q8_0", "-b": "2048", "-ub": "512",
+                            "-fa": "on", "--host": "0.0.0.0", "--port": "8081", "-m": str(Path("models") / local.name)}.items():
+            self.assertEqual(args[args.index(flag) + 1], value)
+        self.assertEqual(manifest["model"]["file"], local.name)
+        self.assertLess(dest.stat().st_size, 20000)
+        self.assertEqual(local.read_bytes(), b"model")
+
+    def test_export_kit_cancel_and_invalid_inputs_leave_existing_zip(self):
+        dest = self.tmp / "kit.zip"
+        dest.write_bytes(b"keep")
+        stopped = threading.Event()
+        stopped.set()
+        with self.assertRaises(InterruptedError):
+            kit.export_kit(dest, model("m.gguf", 1), "cuda", stop=stopped)
+        for file, variant, port in (("../m.gguf", "cuda", 8080), ("m.gguf", "bad", 8080), ("m.gguf", "cuda", 0)):
+            with self.subTest(file=file, variant=variant, port=port), self.assertRaises(ValueError):
+                kit.export_kit(dest, model(file, 1), variant, port=port)
+        self.assertEqual(dest.read_bytes(), b"keep")
+
+    def test_cli_exports_a_launcher_zip(self):
+        from yakupatch import cli
+        dest = self.tmp / "cli kit.zip"
+        with patch.object(kit, "catalogue", return_value=[model("m.gguf", 1)]), \
+                patch.object(kit, "hardware", return_value={"variant": "cpu"}), \
+                patch.object(kit, "download") as download:
+            self.assertEqual(cli.main(["sakura", "kit", "m.gguf", "--variant", "cpu", "--output", str(dest)]), 0)
+            download.assert_not_called()
+        with zipfile.ZipFile(dest) as z:
+            self.assertEqual(json.loads(z.read("kit.json"))["variant"], "cpu")
 
 
 if __name__ == "__main__":

@@ -132,7 +132,11 @@ class SettingsDialog(QDialog):
         self.local_lan = QCheckBox(tr("允許區網連線（其他電腦可使用這台的模型；請只在信任的網路開啟）"),
                                    checked=bool(saved.get("lan")))
         self.local_auto = QCheckBox(tr("啟動 YakuPatch 時自動開啟伺服器"), checked=bool(saved.get("autostart")))
-        for label, widget in ((tr("使用的模型（已下載）"), self.local_model), (tr("連接埠"), self.local_port),
+        model_row = QHBoxLayout()
+        model_row.addWidget(self.local_model, 1)
+        model_row.addWidget(QPushButton(tr("刪除模型…"), clicked=self.delete_model))
+        form.addRow(tr("使用的模型（已下載）"), model_row)
+        for label, widget in ((tr("連接埠"), self.local_port),
                               (tr("平行槽數"), self.local_slots), (tr("每槽 context"), self.local_ctx),
                               (tr("GPU 層數（999＝全部）"), self.local_ngl), ("", self.local_lan), ("", self.local_auto)):
             form.addRow(label, widget)
@@ -153,7 +157,7 @@ class SettingsDialog(QDialog):
         row.addWidget(QLabel(tr("其他電腦：顯示卡記憶體")))
         row.addWidget(self.kit_vram)
         row.addWidget(self.kit_variant)
-        row.addWidget(QPushButton(tr("匯出啟動包…"), clicked=self.export_kit))
+        row.addWidget(QPushButton(tr("匯出簡易啟動包 ZIP…"), clicked=self.export_kit))
         v.addLayout(row)
         self._fill_installed(saved.get("model", ""))
         self._fill_models()
@@ -227,6 +231,36 @@ class SettingsDialog(QDialog):
         self._download(tr("下載 llama.cpp（MB）"),
                        lambda progress, stop: sakura_kit.install_llama(variant, progress=progress, stop=stop))
 
+    def delete_model(self):
+        name = self.local_model.currentText()
+        if not name:
+            QMessageBox.information(self, "YakuPatch", tr("請先選取已下載的模型"))
+            return
+        if sakura_kit.SERVER.running:
+            QMessageBox.warning(self, "YakuPatch", tr("請先停止本地 Sakura 伺服器，再刪除模型"))
+            return
+        if QMessageBox.question(self, tr("刪除模型"), tr("永久刪除已下載的「{}」？需要時可重新下載。").format(name),
+                                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+            return
+        try:
+            saved = core.load_config().get("sakura_local", {})
+            sakura_kit.delete_model(name)
+        except (OSError, ValueError) as ex:
+            QMessageBox.warning(self, "YakuPatch", tr("無法刪除模型：{}").format(ex))
+            return
+        if saved.get("model") == name:
+            saved = {**saved, "model": "", "autostart": False}
+            self.local_auto.setChecked(False)
+            try:
+                core.save_config("sakura_local", saved)
+            except (OSError, ValueError, TypeError) as ex:
+                QMessageBox.warning(self, "YakuPatch", tr("模型已刪除，但設定未儲存：{}").format(ex))
+        self._fill_installed(saved.get("model", ""))
+        if not saved.get("model"):
+            self.local_model.setCurrentIndex(-1)
+        self._fill_models()
+        self.server_status.setText(tr("已刪除模型：{}").format(name))
+
     def local_values(self) -> dict:
         return {"model": self.local_model.currentText(), "port": self.local_port.value(),
                 "gpu_layers": self.local_ngl.value(), "slots": self.local_slots.value(),
@@ -267,12 +301,22 @@ class SettingsDialog(QDialog):
         model = self._selected_model()
         if not model:
             return
-        folder = QFileDialog.getExistingDirectory(self, tr("選擇啟動包的存放資料夾（建議空資料夾）"))
-        if not folder:
+        path, _ = QFileDialog.getSaveFileName(self, tr("匯出簡易啟動包（首次啟動時下載模型）"),
+                                             f"Sakura_{Path(model.file).stem}.zip", "ZIP (*.zip)")
+        if not path:
             return
+        if not path.lower().endswith(".zip"):
+            path += ".zip"
         variant = self.kit_variant.currentData()
-        self._download(tr("匯出 Sakura 啟動包（MB）"), lambda progress, stop: sakura_kit.export_kit(
-            Path(folder), model, variant, progress=progress, stop=stop))
+
+        def done(job):
+            if job.error:
+                QMessageBox.warning(self, "YakuPatch", tr("匯出失敗：{}").format(job.error))
+            else:
+                QMessageBox.information(self, "YakuPatch", tr("已匯出：{}\n解壓縮後啟動，才會下載 llama.cpp 與模型。").format(job.result))
+
+        self.window_.run_bg(lambda job: sakura_kit.export_kit(Path(path), model, variant, stop=job.stop), done,
+                            tr("匯出 Sakura 簡易啟動包 ZIP"))
 
     # ---------- Codex ----------
     def _codex(self):

@@ -7,7 +7,7 @@ from pathlib import Path
 from yakupatch import core, engines, vfs
 from yakupatch.engines.kirikiri import KiriKiri
 from yakupatch.exchange import Store
-from yakupatch.extract import project_dir
+from yakupatch.extract import LanguageGateStop, probe, project_dir
 from helpers import snapshot
 
 KS = """*start|開始
@@ -52,6 +52,10 @@ class Xp3Format(unittest.TestCase):
 
 
 class KiriKiriParse(unittest.TestCase):
+    def test_compiled_tjs_is_not_treated_as_empty_text(self):
+        with self.assertRaisesRegex(ValueError, "編譯"):
+            KiriKiri().decode("data.xp3!startup.tjs", b"TJS2100\0" + b"\0" * 32)
+
     def test_speaker_choice_and_round_trip(self):
         k = KiriKiri()
         segs = k.parse("data.xp3!scenario/a.ks", KS)
@@ -94,6 +98,31 @@ class KiriKiriPatch(unittest.TestCase):
         self.plugin = engines.detect(self.game)[0]
         self.store = Store(project_dir(self.game, self.plugin, self.home))
         core.extract(self.game, self.plugin, self.store, force=True)
+
+    def test_builtin_chinese_scenario_is_detected_before_decoding(self):
+        (self.game / "data.xp3").write_bytes(vfs.Xp3.write({
+            "startup.tjs": b"TJS2100\0" + b"\0" * 32,
+            "scenario/zh-Hant/first.scn": b"compiled Chinese scenario",
+            "fonts/chinese.ttf": b"font"}))
+        lang, packs = probe(self.game, self.plugin)
+        self.assertEqual([p.path for p in packs], ["data.xp3!scenario/zh-Hant/first.scn"])
+        with self.assertRaises(LanguageGateStop):
+            core.extract(self.game, self.plugin, self.store)
+
+    def test_compiled_startup_does_not_block_readable_scenarios(self):
+        (self.game / "data.xp3").write_bytes(vfs.Xp3.write({
+            "startup.tjs": b"TJS2100\0" + b"\0" * 32,
+            "scenario/first.ks": KS.encode("cp932"), "fonts/chinese.ttf": b"font"}))
+        self.assertEqual(self.plugin.language_packs(self.game), [])
+        core.extract(self.game, self.plugin, self.store)
+        self.assertNotIn("data.xp3!startup.tjs", self.store.manifest["files"])
+        self.assertGreater(len(self.store.records), 0)
+
+    def test_compiled_only_game_is_unsupported(self):
+        (self.game / "patch.xp3").unlink()
+        (self.game / "data.xp3").write_bytes(vfs.Xp3.write({"startup.tjs": b"TJS2100\0" + b"\0" * 32}))
+        with self.assertRaisesRegex(ValueError, "編譯"):
+            probe(self.game, self.plugin)
 
     def test_new_patch_archive_and_restore(self):
         self.assertIsInstance(self.plugin, KiriKiri)

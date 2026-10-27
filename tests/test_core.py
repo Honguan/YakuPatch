@@ -172,6 +172,48 @@ class CoreApi(unittest.TestCase):
         with self.assertRaises(ValueError):
             core.launch(self.game)
 
+    def test_confirmed_builtin_chinese_survives_redetection(self):
+        lib = core.Library()
+        key = lib.add(self.game)[0]
+        lib.set_builtin_chinese(key, True)
+        lib.redetect(key)
+        lib.scan(self.game.parent)
+        row = core.Library().row(key, self.home)
+        self.assertTrue(row["no_need"])
+        self.assertEqual(row["status"], "不需翻譯")              # even with an old extraction manifest
+        lib.set_builtin_chinese(key, False)
+        self.assertFalse(core.Library().row(key, self.home)["no_need"])
+
+    def test_confirmed_chinese_blocks_single_and_batch_without_backend(self):
+        lib = core.Library()
+        key = lib.add(self.game)[0]
+        lib.set_builtin_chinese(key, True)
+        before = snapshot(self.game)
+        with patch.object(IdsFake, "prepare", side_effect=AssertionError("must not contact backend")):
+            with self.assertRaisesRegex(ValueError, "不需翻譯"):
+                core.translate(self.store, self.plugin, IdsFake())
+            with self.assertRaises(LanguageGateStop):
+                core.extract(self.game, self.plugin, self.store)
+            rows = core.batch([self.game], IdsFake, self.home, apply=True)
+        self.assertEqual(rows[0]["status"], "skip")
+        self.assertEqual(snapshot(self.game), before)
+
+    def test_cli_single_translation_respects_chinese_mark(self):
+        from yakupatch import cli
+        lib = core.Library()
+        lib.set_builtin_chinese(lib.add(self.game)[0], True)
+        with patch.object(cli, "_backend", side_effect=AssertionError("must not create backend")):
+            self.assertEqual(cli.main(["--home", str(self.home), "translate", str(self.game)]), 1)
+            self.assertEqual(cli.main(["--home", str(self.home), "extract", str(self.game)]), 2)
+
+    def test_batch_skips_builtin_chinese_even_if_already_extracted(self):
+        from yakupatch.engines.base import LangPack
+        with patch.object(self.plugin, "language_packs", return_value=[LangPack("zh", "scenario/zh", "中文")]), \
+                patch.object(core, "translate") as translate:
+            rows = core.batch([self.game], IdsFake, self.home, apply=True)
+        self.assertEqual(rows[0]["status"], "skip")
+        translate.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

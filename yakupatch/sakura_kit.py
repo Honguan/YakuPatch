@@ -1,16 +1,16 @@
 """Local Sakura server kit: hardware check, SakuraLLM model catalogue, downloads, llama-server start/stop, and a
-portable folder for running the server on another PC. Files live under ~/.yakupatch/sakura (never the game)."""
+small launcher ZIP for running the server on another PC. Files live under ~/.yakupatch/sakura (never the game)."""
 import atexit
 import ctypes
 import hashlib
+import io
 import json
 import os
 import re
-import shutil
 import subprocess
 import time
 import zipfile
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from functools import cache
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -165,6 +165,16 @@ def catalogue() -> list[Model]:
 
 def installed() -> list[Path]:
     return sorted((home() / "models").glob("*.gguf"))
+
+
+def delete_model(name: str) -> None:
+    """Delete only a downloaded model; stop the local server first."""
+    if SERVER.running:
+        raise ValueError("請先停止本地 Sakura 伺服器，再刪除模型")
+    path = next((p for p in installed() if p.name == name), None)
+    if path is None:
+        raise ValueError("找不到已下載的模型")
+    path.unlink()
 
 
 def version_of(file: str) -> str:
@@ -327,34 +337,43 @@ SERVER = Server()
 
 # ---------- portable kit for another PC ----------
 START_BAT = """@echo off
-rem YakuPatch Sakura server kit. Listens on the local network so YakuPatch on another PC can use this GPU.
+setlocal
 cd /d "%~dp0"
-echo Sakura server: http://%COMPUTERNAME%:{port}/v1  (YakuPatch: Settings - Sakura - API address)
-{command}
+set "PSModulePath="
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0start_sakura.ps1"
+set "RC=%errorlevel%"
 pause
+exit /b %RC%
 """
-README = """YakuPatch Sakura 啟動包
-1. 雙擊 start_sakura.bat 啟動伺服器（第一次 Windows 防火牆會詢問，請只允許「私人網路」）。
+README = """YakuPatch Sakura 簡易啟動包
+1. 將 ZIP 解壓縮到可寫入的資料夾，雙擊 start_sakura.bat。首次啟動會從官方來源下載 llama.cpp 與指定模型，並校驗 SHA-256；不需要安裝 Python 或 YakuPatch。
 2. 在要翻譯的電腦上，YakuPatch「設定 → Sakura」的 API 位址填 http://這台電腦的IP:{port}/v1，提示詞版本選 {version}。
-3. 伺服器會對區網開放，請只在信任的網路使用；不用時關閉視窗即可停止。
+3. 後續啟動重用此資料夾中的下載內容；下載中斷時保留 .part，下次可續傳。首次 Windows 防火牆詢問時，請只允許「私人網路」。
+4. 伺服器會對區網開放，請只在信任的網路使用；不用時關閉視窗即可停止。啟動參數記錄在 kit.json 的 args。
 模型：{model}（來源：huggingface.co/SakuraLLM，授權依模型頁面）
+llama.cpp 版本：{variant}。ZIP 只包含腳本與設定，不含 llama.cpp 或模型檔案。
 """
 
 
 def export_kit(dest: Path, model: Model, variant: str, port: int = 8080, progress=None, stop=None) -> Path:
-    """llama.cpp + the model + start_sakura.bat in one folder. A model already downloaded here is copied."""
-    dest.mkdir(parents=True, exist_ok=True)
-    llama = install_llama(variant, dest / "llama", progress=progress and (lambda d, t: progress(d, t, "llama.cpp")),
-                          stop=stop)
-    local = home() / "models" / model.file
-    target = dest / "models" / model.file
-    if local.exists() and not target.exists():
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(local, target)
-    elif not target.exists():
-        download_model(model, dest / "models", progress and (lambda d, t: progress(d, t, model.file)), stop)
-    exe = server_exe(llama).relative_to(dest)
-    command = subprocess.list2cmdline(server_args(exe, Path("models") / model.file, LocalConfig(port=port, lan=True)))
-    atomic_write(dest / "start_sakura.bat", START_BAT.format(command=command, port=port).replace("\n", "\r\n").encode("utf-8"))
-    atomic_write(dest / "README.txt", README.format(port=port, version=model.version, model=model.file).encode("utf-8"))
+    """Export a small ZIP without network access; the target PC downloads llama.cpp and the model on first start."""
+    dest = Path(dest)
+    if dest.suffix.lower() != ".zip" or variant not in VARIANTS:
+        raise ValueError("請指定 ZIP 檔案與有效的 llama.cpp 版本")
+    if Path(model.file).name != model.file or not model.file.endswith(".gguf") or not re.fullmatch(r"[\w.-]+", model.repo):
+        raise ValueError("模型名稱或來源不合法")
+    cfg = LocalConfig(port=port, lan=True)
+    manifest = {"model": asdict(model), "variant": variant, "port": port,
+                "args": server_args(Path("llama-server.exe"), Path("models") / model.file, cfg)[1:]}
+    if stop is not None and stop.is_set():
+        raise InterruptedError("已取消匯出")
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr("kit.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+        z.writestr("start_sakura.bat", START_BAT.replace("\n", "\r\n"))
+        z.writestr("start_sakura.ps1", Path(__file__).with_name("sakura_start.ps1").read_bytes())
+        z.writestr("README.txt", README.format(port=port, version=model.version, model=model.file, variant=variant))
+    atomic_write(dest, data.getvalue())
+    if progress:
+        progress(1, 1, "ZIP")
     return dest
