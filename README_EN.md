@@ -87,7 +87,7 @@
 
 * **Step 3: Add a game and translate**
   * Add the game folder to the library on the left and follow the step bar at the top: Detect → Language check → Extract → Translate → Apply.
-  * Games detected as Chinese or containing Chinese scenario packs are marked 不需翻譯 (No translation needed) and skipped in batches. For encrypted games whose Chinese option you have confirmed in-game, right-click the library entry and select 遊戲內可切換中文（不需翻譯）. The reversible flag survives rescans. Translation and applying patches are disabled in the GUI, while restoring existing changes remains available.
+  * Games detected as Chinese or containing Chinese scenario packs are marked 不需翻譯 (No translation needed) and skipped in batches. KiriKiri detection also checks explicit Chinese language-switch shortcuts in README files and supported-language declarations in configuration scripts, including simply scrambled or compressed configurations. Rescan to update matching games. Chinese fonts or installation instructions alone do not trigger exclusion. For encrypted games whose Chinese option you have confirmed in-game, right-click the library entry and select 遊戲內可切換中文（不需翻譯）. The reversible flag survives rescans. Translation and applying patches are disabled in the GUI, while restoring existing changes remains available.
   * To restore the game, click 還原遊戲 (Restore game).
 
 > The interface is in Traditional Chinese.

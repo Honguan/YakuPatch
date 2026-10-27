@@ -3,6 +3,8 @@ Initialize.tjs mounts patch.xp3, patch2.xp3, ... after the other archives, by fi
 import codecs
 import dataclasses
 import re
+import struct
+import zlib
 from pathlib import Path
 
 from .. import vfs
@@ -21,6 +23,44 @@ _TJS_LOC = re.compile(r"^L(\d+):(\d+)$")
 _TJS_BODY = re.compile(r'(?:[^"\\\n]|\\.)*')
 _JA = re.compile(r"[぀-ヿ一-鿿]")
 _ZH_PATH = re.compile(r"(?:^|[/_.-])(?:zh(?:[-_](?:cn|tw|hans|hant))?|chs|cht|[st]?chinese)(?=$|[/_.-])", re.I)
+_LANG_TAGS = re.compile(r'^\s*\.multiLangLanguageTags\s*=\s*\[([^\]]*)\]\s*;', re.M)
+_ZH_TAG = re.compile(r'^["\'](?:tw|cn|zh(?:[-_](?:cn|tw|hans|hant))?|chs|cht|[st]?chinese)["\']$', re.I)
+_LANG_KEYS = re.compile(r'^[ \t#▽▼■◆●*=-]*(?:語言切換|语言切换|language\s+(?:switch|selection))[^\n]*\n'
+                        r'(?:[^\n]*\n){0,6}?[・•*\s-]*[A-Z]\s*[:：]\s*'
+                        r'(?:(?:繁體|简体|簡體|繁体)?中文|(?:Traditional|Simplified)\s+Chinese)\s*(?:\n|$)', re.I | re.M)
+_CONFIG_LIMIT = 256 * 1024
+
+
+def _config_text(raw: bytes) -> str:
+    """Read language declarations only; never execute configuration scripts."""
+    if len(raw) > _CONFIG_LIMIT:
+        raise ValueError("Configuration too large")
+    if not raw.startswith(b"\xfe\xfe"):
+        return decode(raw)[0]
+    if len(raw) < 5 or raw[3:5] != b"\xff\xfe":
+        raise ValueError("Invalid text header")
+    mode, body = raw[2], raw[5:]
+    # KiriKiri TextStream.cpp: modes 0/1 scramble UTF-16; mode 2 compresses it.
+    if mode == 2:
+        if len(body) < 16:
+            raise ValueError("Truncated text header")
+        compressed, size = struct.unpack("<QQ", body[:16])
+        if compressed != len(body) - 16 or size > _CONFIG_LIMIT:
+            raise ValueError("Invalid text size")
+        stream = zlib.decompressobj()
+        body = stream.decompress(body[16:], _CONFIG_LIMIT + 1)
+        if len(body) != size or not stream.eof or stream.unused_data:
+            raise ValueError("Invalid compressed text")
+    elif mode in (0, 1) and len(body) % 2 == 0:
+        values = (c for c, in struct.iter_unpack("<H", body))
+        if mode == 0:
+            values = (c ^ (((c & 0xfe) << 8) ^ 1) if c >= 0x20 else c for c in values)
+        else:
+            values = (((c & 0xaaaa) >> 1) | ((c & 0x5555) << 1) for c in values)
+        body = b"".join(struct.pack("<H", c) for c in values)
+    else:
+        raise ValueError("Unsupported text mode")
+    return body.decode("utf-16le")
 
 
 def _number(name: str) -> int:
@@ -56,12 +96,44 @@ class KiriKiri(Tyrano):
 
     def language_packs(self, game_dir: Path) -> list[LangPack]:
         packs = []
+        for path in sorted(game_dir.glob("*")):
+            if not path.name.lower().startswith("readme") or path.suffix.lower() != ".txt":
+                continue
+            try:
+                with path.open("rb") as f:
+                    raw = f.read(_CONFIG_LIMIT + 1)
+                if len(raw) > _CONFIG_LIMIT:
+                    continue
+                for encoding in ("utf-8-sig", "utf-16", "cp950", "gb18030"):
+                    try:
+                        if _LANG_KEYS.search(raw.decode(encoding)):
+                            return [LangPack("zh", path.name, "遊戲說明列有中文切換快捷鍵")]
+                    except UnicodeError:
+                        continue
+            except OSError:
+                continue
+        configs = {}
         for name, _ in self._archives(game_dir):
-            for inner in vfs.Xp3(game_dir / name).files:
+            archive = vfs.Xp3(game_dir / name)
+            for inner in archive.files:
+                base = inner.rsplit("/", 1)[-1].lower()
+                if base in ("default.tjs", "config.tjs", "appconfig.tjs"):
+                    configs[base] = (archive, inner, f"{name}{vfs.SEP}{inner}")
                 if inner.lower().endswith((".ks", ".scn")) and _ZH_PATH.search(f"{name}/{inner}"):
                     rel = f"{name}{vfs.SEP}{inner}"
                     packs.append(LangPack("zh", rel, "遊戲內有中文劇本，請在遊戲設定切換語言"))
                     break
+        for archive, inner, rel in configs.values():
+            if sum(s[2] for s in archive.files[inner]) > _CONFIG_LIMIT:
+                continue
+            try:
+                text = _config_text(archive.read(inner))
+            except (OSError, ValueError, zlib.error):
+                continue
+            text = re.sub(r'/\*.*?\*/|//[^\n]*', '', text, flags=re.S)
+            declarations = _LANG_TAGS.findall(text)
+            if declarations and any(_ZH_TAG.fullmatch(tag.strip()) for tag in declarations[-1].split(",")):
+                packs.append(LangPack("zh", rel, "遊戲設定宣告可選中文，請在遊戲內切換語言"))
         return packs
 
     def locate(self, game_dir: Path) -> list[str]:
