@@ -147,6 +147,7 @@ class Gui(unittest.TestCase):
         win._refresh_counts()
         self.assertTrue(win.rows[self.key]["no_need"])
         self.assertEqual(win.primary.text(), "啟動遊戲")
+        self.assertIn("中文包", win.title.text())
         self.assertFalse(win.tabs.isTabEnabled(3))
         with patch.object(MainWindow, "make_backend", side_effect=AssertionError("Chinese game must be skipped")):
             win.batch_translate(apply=True)

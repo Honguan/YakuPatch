@@ -766,6 +766,7 @@ class MainWindow(QMainWindow):
         game, plugin, store = self.current
         c = core.counts(store)
         entry = self.lib.games.get(self.key, {})
+        row = self.lib.row(self.key, self.home)
         probe = store.manifest.get("language_probe") or entry.get("probe") or {}
         extracted, applied = bool(store.manifest), bool(core.Backup(game).files)
         todo = c["translated"] + c["reviewed"] + c["pending"] + c["failed"]
@@ -773,7 +774,7 @@ class MainWindow(QMainWindow):
         self.stages.set("整體", c["translated"] + c["reviewed"], todo, tr("已翻 {}／可翻 {}（{}%）").format(
             c["translated"] + c["reviewed"], todo, pct))
         self.title.setText(f"{game.name if game.name.lower() != 'www' else game.parent.name}    "
-                           f"{plugin.name}  [{core.LANG.get(entry.get('lang'), entry.get('lang', '—'))}]")
+                           f"{plugin.name}  [{row['lang']}]")
         marks = [True, bool(probe), extracted, extracted and c["pending"] + c["failed"] == 0 and todo > 0, applied]
         for b, name, ok, i in zip(self.step_buttons, STEPS, marks, range(5)):
             b.setText(tr(name) + (" ✓" if ok else f" {pct}%" if i == 3 and extracted else ""))
@@ -782,7 +783,6 @@ class MainWindow(QMainWindow):
             game, plugin.name, plugin.detect(game), len(store.manifest.get("files", {})), c["total"], c["pending"],
             c["translated"], c["reviewed"], c["failed"], c["skip"], c["uncertain"]))
         zh = probe.get("primary", "").startswith("zh") or bool(probe.get("packs"))
-        row = self.lib.row(self.key, self.home)
         zh = zh or row["no_need"]
         for i in (1, 2, 3):
             self.tabs.setTabEnabled(i, not zh)
