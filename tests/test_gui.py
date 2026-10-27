@@ -140,6 +140,40 @@ class Gui(unittest.TestCase):
         self.assertEqual(list(win.lib.games), [self.key])
         self.assertEqual(win.lib_list.count(), 1)
 
+    def test_builtin_chinese_is_not_offered_for_translation(self):
+        win = self.win
+        win.lib.games[self.key]["builtin_chinese"] = True
+        win.refresh_library()
+        win._refresh_counts()
+        self.assertTrue(win.rows[self.key]["no_need"])
+        self.assertEqual(win.primary.text(), "啟動遊戲")
+        self.assertFalse(win.tabs.isTabEnabled(3))
+        with patch.object(MainWindow, "make_backend", side_effect=AssertionError("Chinese game must be skipped")):
+            win.batch_translate(apply=True)
+            win.start_translation()
+        self.assertIsNone(win.batch_job)
+
+    def test_chinese_mark_invalidates_preview_and_can_be_removed(self):
+        win = self.win
+        win.extract()
+        self.idle()
+        pending = []
+        with patch.object(win, "run_bg", side_effect=lambda fn, done, label: pending.append(done)):
+            win.preview()
+        win.set_builtin_chinese(self.key, True)
+        from types import SimpleNamespace
+        pending[0](SimpleNamespace(error=None, result=SimpleNamespace(files=[object()])))
+        self.assertIsNone(win.plan)
+        self.assertFalse(win.apply_button.isEnabled())
+        self.assertTrue(win.tabs.isTabEnabled(4))             # restore remains accessible
+        with patch.object(core, "preview", side_effect=AssertionError("must not preview")), \
+                patch.object(core, "apply", side_effect=AssertionError("must not write")):
+            win.preview()
+            win.apply()
+        win.set_builtin_chinese(self.key, False)
+        self.assertTrue(win.tabs.isTabEnabled(3))
+        self.assertTrue(win.preview_button.isEnabled())
+
     def test_full_flow_through_gui(self):
         win = self.win
         win.extract()

@@ -70,7 +70,18 @@ def counts(store: Store) -> dict:
 
 def extract(game: Path, plugin, store: Store, force=False) -> dict:
     """Raises extract.LanguageGateStop when the game is already Chinese; `force` is「仍要翻譯」."""
+    if not force and Library().games.get(str(Path(game).resolve()), {}).get("builtin_chinese"):
+        raise extraction.LanguageGateStop({**extraction.language_gate([]), "primary": "zh"}, [])
     return extraction.extract(game, plugin, store, force=force)
+
+
+def translation_blocked(game: Path, plugin, store: Store) -> bool:
+    entry = Library().games.get(str(Path(game).resolve()), {})
+    probes = (entry.get("probe", {}), store.manifest.get("language_probe", {}))
+    return bool(entry.get("builtin_chinese") or entry.get("lang") == "packs"
+                or entry.get("lang", "").startswith("zh")
+                or any(p.get("primary", "").startswith("zh") or p.get("packs") for p in probes)
+                or plugin.language_packs(game))
 
 
 def estimate(store: Store, plugin, backend, limit=None, only=None, fresh=False) -> dict:
@@ -84,6 +95,8 @@ def translate(store: Store, plugin, backend, limit=None, progress=None, stop=Non
     if not store.manifest:
         raise ValueError("尚未提取文本，請先執行 extract")
     pipeline.select(store, limit, only)
+    if translation_blocked(Path(store.manifest["game_dir"]), plugin, store):
+        raise ValueError("遊戲內已有中文，不需翻譯")
     backend.prepare()
     store.busy = True
     try:
@@ -112,6 +125,9 @@ def batch(paths: list, make_backend, home: Path | None = None, apply=False, limi
         try:
             game, plugin, store = opener(path) if opener else open_game(path, home)
             row["game"] = str(game)
+            if translation_blocked(game, plugin, store):
+                row["status"] = "skip"
+                continue
             if not store.manifest:
                 report("提取")
                 extract(game, plugin, store)
@@ -401,7 +417,14 @@ class Library:
 
     def redetect(self, key: str) -> None:
         game, plugin, _ = open_game(Path(key))
-        self.games[key] = {"engine": plugin.name, **_detect(game, plugin)}
+        self.games[key].update({"engine": plugin.name, **_detect(game, plugin)})
+        self._save()
+
+    def set_builtin_chinese(self, key: str, enabled: bool) -> None:
+        if enabled:
+            self.games[key]["builtin_chinese"] = True
+        else:
+            self.games[key].pop("builtin_chinese", None)
         self._save()
 
     def remove(self, key: str) -> None:
@@ -418,6 +441,9 @@ class Library:
         row = {"key": key, "name": game.parent.name if game.name.lower() == "www" else game.name,
                "engine": e["engine"], "lang": LANG.get(e.get("lang"), e.get("lang", "")), "progress": 0,
                "no_need": False, "reason": e.get("unsupported", "")}
+        if e.get("builtin_chinese"):
+            return {**row, "lang": "中文包", "status": "不需翻譯", "no_need": True,
+                    "reason": "已由使用者確認遊戲內可切換中文"}
         if row["reason"]:
             return {**row, "status": "不支援"}
         if e.get("lang") == "packs" or e.get("lang", "").startswith("zh"):
@@ -429,8 +455,8 @@ class Library:
             done = c["translated"] + c["reviewed"]
             todo = done + c["pending"] + c["failed"]
             row["progress"] = round(100 * done / todo) if todo else 100
-        row["status"] = ("已寫回" if Backup(game).files else "已提取" if (project / "manifest.json").exists()
-                         else "不需翻譯" if row["no_need"] else "未處理")
+        row["status"] = ("不需翻譯" if row["no_need"] else "已寫回" if Backup(game).files
+                         else "已提取" if (project / "manifest.json").exists() else "未處理")
         return row
 
 

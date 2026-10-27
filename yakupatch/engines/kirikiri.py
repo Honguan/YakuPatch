@@ -8,7 +8,7 @@ from pathlib import Path
 from .. import vfs
 from ..backup import Backup
 from ..encoding import decode
-from .base import Segment
+from .base import LangPack, Segment
 from .tyrano import Tyrano
 
 _PATCH = re.compile(r"^patch(\d*)\.xp3$", re.I)
@@ -20,6 +20,7 @@ _TJS = re.compile(r'(new\s+KAGMenuItem\s*\(\s*this\s*,\s*|\bcaption\s*=\s*|askYe
 _TJS_LOC = re.compile(r"^L(\d+):(\d+)$")
 _TJS_BODY = re.compile(r'(?:[^"\\\n]|\\.)*')
 _JA = re.compile(r"[぀-ヿ一-鿿]")
+_ZH_PATH = re.compile(r"(?:^|[/_.-])(?:zh(?:[-_](?:cn|tw|hans|hant))?|chs|cht|[st]?chinese)(?=$|[/_.-])", re.I)
 
 
 def _number(name: str) -> int:
@@ -53,6 +54,16 @@ class KiriKiri(Tyrano):
             k += 1
         return f"patch{k}.xp3" if k > 1 else "patch.xp3"
 
+    def language_packs(self, game_dir: Path) -> list[LangPack]:
+        packs = []
+        for name, _ in self._archives(game_dir):
+            for inner in vfs.Xp3(game_dir / name).files:
+                if inner.lower().endswith((".ks", ".scn")) and _ZH_PATH.search(f"{name}/{inner}"):
+                    rel = f"{name}{vfs.SEP}{inner}"
+                    packs.append(LangPack("zh", rel, "遊戲內有中文劇本，請在遊戲設定切換語言"))
+                    break
+        return packs
+
     def locate(self, game_dir: Path) -> list[str]:
         ours = _number(self._patch_name(game_dir))
         found: dict[str, tuple[str, int]] = {}         # file name -> (rel, archive number); patches go by name
@@ -66,7 +77,12 @@ class KiriKiri(Tyrano):
                     clash.add(key)                     # one patch file would replace both: leave them alone
                 found[key] = (f"{name}{vfs.SEP}{inner}", k)
         rels = [rel for key, (rel, k) in found.items() if (k or key not in clash) and k < ours]
+        compiled = [rel for rel in rels if rel.lower().endswith(".tjs")
+                    and vfs.read_original(game_dir, rel).startswith(b"TJS2100\0")]
+        rels = [rel for rel in rels if rel not in compiled]
         if not rels:
+            if compiled:
+                raise ValueError("只有已編譯 TJS，無法提取文本；請先檢查遊戲內是否可切換中文")
             raise ValueError("找不到 KiriKiri 的 .ks 腳本（可能使用 .scn 或已加密）")
         return sorted(rels)
 
@@ -82,6 +98,8 @@ class KiriKiri(Tyrano):
         return ""
 
     def decode(self, rel: str, raw: bytes, game_dir: Path | None = None) -> tuple[str, dict]:
+        if raw.startswith(b"TJS2100\0"):
+            raise ValueError(f"腳本是已編譯 TJS，無法提取文本；請先檢查遊戲內是否可切換中文：{rel}")
         if raw[:2] == b"\xfe\xfe":
             raise ValueError(f"腳本使用吉里吉里簡易加密，尚未支援：{rel}")
         try:

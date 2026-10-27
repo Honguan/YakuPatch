@@ -14,7 +14,7 @@ from .backends.codex import Codex
 from .backends.openai_compat import OpenAICompat, OpenAIConfig
 from .backends.sakura import Sakura, SakuraConfig
 from .backup import Backup
-from .extract import LanguageGateStop, extract, projects_home
+from .extract import LanguageGateStop, projects_home
 from .exchange import Store
 
 _LANG = {"ja": "日文", "mixed": "混合（部分已是中文）", "zh-Hans": "簡體中文", "zh-Hant": "繁體中文",
@@ -292,7 +292,7 @@ def _run(args) -> int:
         print(f"引擎：{plugin.name}\n遊戲資料夾：{game}\n專案資料夾：{store.dir}")
     elif args.cmd == "extract":
         try:
-            probe = extract(game, plugin, store, force=args.force)
+            probe = core.extract(game, plugin, store, force=args.force)
         except LanguageGateStop as stop:
             p = stop.probe
             print(f"語言預檢：{_LANG.get(p['primary'], p['primary'])}，不需翻譯。"
@@ -309,6 +309,8 @@ def _run(args) -> int:
     elif args.cmd == "translate":
         if not store.manifest:
             raise ValueError("尚未提取文本，請先執行 extract")
+        if core.translation_blocked(game, plugin, store):
+            raise ValueError("遊戲內已有中文，不需翻譯")
         pipeline.select(store, args.limit)
         backend = _backend(args)
         if not args.dry_run:
