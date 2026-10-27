@@ -106,17 +106,44 @@ class MonoStrings(unittest.TestCase):
 class TypeTree(unittest.TestCase):
     def test_generator_failure_skips_the_object(self):
         class Gen:
+            calls = 0
             def get_nodes_as_json(self, asm, cls):
+                self.calls += 1
                 raise AssertionError("failed to dump nodes as json")
         ctx = _Context.__new__(_Context)
         ctx.gen, ctx.nodes = Gen(), {}
         ms = SimpleNamespace(m_ClassName="Talk", m_AssemblyName="Assembly-CSharp.dll", m_Namespace="")
         ctx.script = lambda obj: ms
-        with self.assertRaises(ValueError):                  # callers skip an object on ValueError
-            ctx.tree(SimpleNamespace(serialized_type=None))
+        for _ in range(20):
+            with self.assertRaises(ValueError):              # callers skip an object on ValueError
+                ctx.tree(SimpleNamespace(serialized_type=None))
+        self.assertEqual(ctx.gen.calls, 1)
+        stored = {"m_Text": "既有型別樹"}
+        obj = SimpleNamespace(serialized_type=SimpleNamespace(node=object()), read_typetree=lambda: stored)
+        self.assertEqual(ctx.tree(obj), ("Talk", stored, None))
         ctx.gen = None                                       # the game's IL2CPP code could not be loaded
         with self.assertRaises(ValueError):
             ctx.tree(SimpleNamespace(serialized_type=None))
+
+    def test_normalizes_assembly_and_keeps_other_classes_readable(self):
+        from unittest.mock import Mock
+        ctx = _Context.__new__(_Context)
+        ctx.nodes = {}
+        nodes = [{"m_Level": 0, "m_Type": "MonoBehaviour", "m_Name": "Base", "m_MetaFlag": 0}]
+        ctx.gen = SimpleNamespace(get_nodes_as_json=Mock(side_effect=[AssertionError("missing"), json.dumps(nodes)]))
+        ms = SimpleNamespace(m_ClassName="Missing", m_AssemblyName="Assembly-CSharp", m_Namespace="Game")
+        ctx.script = lambda obj: ms
+        obj = SimpleNamespace(serialized_type=None, read_typetree=lambda nodes: {"text": "hello"})
+        with self.assertRaises(ValueError):
+            ctx.tree(obj)
+        ms.m_AssemblyName = "Assembly-CSharp.dll"
+        with self.assertRaises(ValueError):
+            ctx.tree(obj)
+        ms.m_ClassName = "Talk"
+        self.assertEqual(ctx.tree(obj)[1], {"text": "hello"})
+        self.assertEqual(ctx.tree(obj)[1], {"text": "hello"})
+        self.assertEqual(ctx.gen.get_nodes_as_json.call_count, 2)
+        self.assertEqual(ctx.gen.get_nodes_as_json.call_args_list[0].args, ("Assembly-CSharp.dll", "Game.Missing"))
 
 
 if __name__ == "__main__":

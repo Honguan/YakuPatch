@@ -63,7 +63,7 @@ class _Context:
             self.gen.load_local_game(str(game_dir))
         except AssertionError:                  # e.g. "failed to load il2cpp": scripts without a stored tree are skipped
             self.gen = None
-        self.nodes: dict[tuple, object] = {}
+        self.nodes: dict[tuple, object | None] = {}
         self.data = data
 
     def script(self, obj):
@@ -85,14 +85,22 @@ class _Context:
             raise ValueError("找不到 MonoScript")
         if self.gen is None:
             raise ValueError("無法載入遊戲的程式碼（IL2CPP），無法讀取此腳本")
-        key = (ms.m_AssemblyName, ms.m_Namespace, cls)
+        assembly = ms.m_AssemblyName
+        if not assembly.endswith(".dll"):
+            assembly += ".dll"
+        key = (assembly, ms.m_Namespace, cls)
+        full = f"{ms.m_Namespace}.{cls}" if ms.m_Namespace else cls
+        error = f"無法產生 {assembly} / {full} 的型別樹（類別或依賴缺失，或格式不支援）"
+        if key in self.nodes and self.nodes[key] is None:
+            raise ValueError(error)
         if key not in self.nodes:
             from UnityPy.helpers.TypeTreeNode import TypeTreeNode
-            full = f"{ms.m_Namespace}.{cls}" if ms.m_Namespace else cls
             try:
-                nodes = json.loads(self.gen.get_nodes_as_json(ms.m_AssemblyName, full))
+                nodes = json.loads(self.gen.get_nodes_as_json(assembly, full))
             except AssertionError as ex:                     # the generator asserts when it cannot build the class
-                raise ValueError(f"無法產生 {full} 的型別樹") from ex
+                # Thousands of objects can share one unsupported class; do not retry its native generator.
+                self.nodes[key] = None
+                raise ValueError(error) from ex
             for i, n in enumerate(nodes[:-3]):
                 # The generator names a list field after its element type; UnityPy then reads one string.
                 if nodes[i + 1]["m_Type"] == "Array" and nodes[i + 1]["m_Level"] == n["m_Level"] + 1 \
