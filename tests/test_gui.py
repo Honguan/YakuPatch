@@ -245,6 +245,83 @@ class Gui(unittest.TestCase):
             self.assertEqual((saved.local_slots.value(), saved.local_ctx.value()), (2, 4096))
             self.assertEqual((core.local_config().slots, core.local_config().ctx_per_slot), (2, 4096))
 
+    def test_delete_downloaded_model_updates_settings_and_lists(self):
+        from PySide6.QtWidgets import QPushButton
+        from yakupatch import sakura_kit as kit
+        from yakupatch.gui.settings import SettingsDialog
+        models = kit.home() / "models"
+        models.mkdir(parents=True)
+        selected, other = models / "m.gguf", models / "other.gguf"
+        selected.write_bytes(b"selected")
+        other.write_bytes(b"other")
+        core.save_config("sakura_local", {"model": selected.name, "autostart": True, "slots": 2})
+        with patch.object(SettingsDialog, "_account", return_value=""):
+            dlg = SettingsDialog(self.win, 1)
+        self.idle()
+        self.assertEqual(dlg.model_table.item(0, 3).text(), "已下載")
+        next(b for b in dlg.findChildren(QPushButton) if b.text() == "刪除模型…").click()
+        self.assertFalse(selected.exists())
+        self.assertEqual(other.read_bytes(), b"other")
+        self.assertEqual(dlg.model_table.item(0, 3).text(), "")
+        self.assertEqual(dlg.local_model.count(), 1)
+        self.assertEqual(dlg.local_model.currentText(), "")
+        self.assertFalse(dlg.local_auto.isChecked())
+        self.assertEqual(core.load_config()["sakura_local"], {"model": "", "autostart": False, "slots": 2})
+
+    def test_delete_model_cancel_and_failure_keep_settings(self):
+        from types import SimpleNamespace
+        from yakupatch import sakura_kit as kit
+        from yakupatch.gui.settings import SettingsDialog
+        models = kit.home() / "models"
+        models.mkdir(parents=True)
+        selected = models / "m.gguf"
+        selected.write_bytes(b"model")
+        core.save_config("sakura_local", {"model": selected.name, "autostart": True})
+        before = core.load_config()
+        with patch.object(SettingsDialog, "_account", return_value=""):
+            dlg = SettingsDialog(self.win, 1)
+        self.idle()
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.No) as question:
+            dlg.delete_model()
+            self.assertEqual(question.call_args.args[-1], QMessageBox.No)  # confirmation defaults to keeping the file
+        with patch.object(kit.SERVER, "process", SimpleNamespace(poll=lambda: None)), \
+                patch.object(QMessageBox, "warning") as warning:
+            dlg.delete_model()
+            self.assertIn("停止", warning.call_args.args[2])
+        with patch.object(kit, "delete_model", side_effect=PermissionError("in use")), \
+                patch.object(QMessageBox, "warning") as warning:
+            dlg.delete_model()
+            self.assertIn("無法刪除", warning.call_args.args[2])
+        self.assertEqual(selected.read_bytes(), b"model")
+        self.assertEqual(dlg.local_model.currentText(), selected.name)
+        self.assertEqual(core.load_config(), before)
+        with patch.object(core, "save_config", side_effect=OSError("read only")), \
+                patch.object(QMessageBox, "warning") as warning:
+            dlg.delete_model()
+            self.assertIn("模型已刪除，但設定未儲存", warning.call_args.args[2])
+        self.assertFalse(selected.exists())
+        self.assertEqual(core.load_config(), before)
+        self.assertEqual(dlg.local_model.currentText(), "")
+        self.assertFalse(dlg.local_auto.isChecked())
+
+    def test_delete_model_keeps_another_saved_model(self):
+        from yakupatch import sakura_kit as kit
+        from yakupatch.gui.settings import SettingsDialog
+        models = kit.home() / "models"
+        models.mkdir(parents=True)
+        for name in ("m.gguf", "other.gguf"):
+            (models / name).write_bytes(b"model")
+        core.save_config("sakura_local", {"model": "other.gguf", "autostart": True})
+        before = core.load_config()
+        with patch.object(SettingsDialog, "_account", return_value=""):
+            dlg = SettingsDialog(self.win, 1)
+        self.idle()
+        dlg.local_model.setCurrentText("m.gguf")
+        dlg.delete_model()
+        self.assertFalse((models / "m.gguf").exists())
+        self.assertEqual(core.load_config(), before)
+        self.assertEqual(dlg.local_model.currentText(), "other.gguf")
+
     def test_settings_openai_tab_saves_without_key_in_config(self):
         from yakupatch.backends import openai_compat
         from yakupatch.gui.settings import SettingsDialog

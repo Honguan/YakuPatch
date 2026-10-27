@@ -132,7 +132,11 @@ class SettingsDialog(QDialog):
         self.local_lan = QCheckBox(tr("允許區網連線（其他電腦可使用這台的模型；請只在信任的網路開啟）"),
                                    checked=bool(saved.get("lan")))
         self.local_auto = QCheckBox(tr("啟動 YakuPatch 時自動開啟伺服器"), checked=bool(saved.get("autostart")))
-        for label, widget in ((tr("使用的模型（已下載）"), self.local_model), (tr("連接埠"), self.local_port),
+        model_row = QHBoxLayout()
+        model_row.addWidget(self.local_model, 1)
+        model_row.addWidget(QPushButton(tr("刪除模型…"), clicked=self.delete_model))
+        form.addRow(tr("使用的模型（已下載）"), model_row)
+        for label, widget in ((tr("連接埠"), self.local_port),
                               (tr("平行槽數"), self.local_slots), (tr("每槽 context"), self.local_ctx),
                               (tr("GPU 層數（999＝全部）"), self.local_ngl), ("", self.local_lan), ("", self.local_auto)):
             form.addRow(label, widget)
@@ -226,6 +230,36 @@ class SettingsDialog(QDialog):
         variant = self.hw["variant"]
         self._download(tr("下載 llama.cpp（MB）"),
                        lambda progress, stop: sakura_kit.install_llama(variant, progress=progress, stop=stop))
+
+    def delete_model(self):
+        name = self.local_model.currentText()
+        if not name:
+            QMessageBox.information(self, "YakuPatch", tr("請先選取已下載的模型"))
+            return
+        if sakura_kit.SERVER.running:
+            QMessageBox.warning(self, "YakuPatch", tr("請先停止本地 Sakura 伺服器，再刪除模型"))
+            return
+        if QMessageBox.question(self, tr("刪除模型"), tr("永久刪除已下載的「{}」？需要時可重新下載。").format(name),
+                                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+            return
+        try:
+            saved = core.load_config().get("sakura_local", {})
+            sakura_kit.delete_model(name)
+        except (OSError, ValueError) as ex:
+            QMessageBox.warning(self, "YakuPatch", tr("無法刪除模型：{}").format(ex))
+            return
+        if saved.get("model") == name:
+            saved = {**saved, "model": "", "autostart": False}
+            self.local_auto.setChecked(False)
+            try:
+                core.save_config("sakura_local", saved)
+            except (OSError, ValueError, TypeError) as ex:
+                QMessageBox.warning(self, "YakuPatch", tr("模型已刪除，但設定未儲存：{}").format(ex))
+        self._fill_installed(saved.get("model", ""))
+        if not saved.get("model"):
+            self.local_model.setCurrentIndex(-1)
+        self._fill_models()
+        self.server_status.setText(tr("已刪除模型：{}").format(name))
 
     def local_values(self) -> dict:
         return {"model": self.local_model.currentText(), "port": self.local_port.value(),

@@ -44,6 +44,37 @@ class SakuraKit(unittest.TestCase):
         system = Sakura(SakuraConfig(version="1.5")).messages([], {}, context=False)[0]["content"]
         self.assertIn("二次元", system)
 
+    def test_delete_only_an_installed_model(self):
+        models = self.tmp / "models"
+        models.mkdir()
+        selected, other = models / "m.gguf", models / "other.gguf"
+        selected.write_bytes(b"selected")
+        other.write_bytes(b"other")
+        outside = self.tmp / "outside.gguf"
+        outside.write_bytes(b"outside")
+        with patch.object(kit, "home", return_value=self.tmp):
+            for name in ("../outside.gguf", str(outside), "missing.gguf"):
+                with self.subTest(name=name), self.assertRaises(ValueError):
+                    kit.delete_model(name)
+            kit.delete_model(selected.name)
+            self.assertEqual(kit.installed(), [other])
+        self.assertEqual(other.read_bytes(), b"other")
+        self.assertEqual(outside.read_bytes(), b"outside")
+
+    def test_delete_model_running_and_file_errors(self):
+        from types import SimpleNamespace
+        models = self.tmp / "models"
+        models.mkdir()
+        selected = models / "m.gguf"
+        selected.write_bytes(b"model")
+        with patch.object(kit, "home", return_value=self.tmp):
+            with patch.object(kit.SERVER, "process", SimpleNamespace(poll=lambda: None)), self.assertRaises(ValueError):
+                kit.delete_model(selected.name)
+            self.assertTrue(selected.exists())
+            with patch.object(Path, "unlink", side_effect=PermissionError("in use")), self.assertRaises(OSError):
+                kit.delete_model(selected.name)
+        self.assertEqual(selected.read_bytes(), b"model")
+
     def test_download_resumes_and_verifies(self):
         data = b"x" * 3000
         dest = self.tmp / "m.gguf"

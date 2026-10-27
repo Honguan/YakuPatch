@@ -167,6 +167,16 @@ def installed() -> list[Path]:
     return sorted((home() / "models").glob("*.gguf"))
 
 
+def delete_model(name: str) -> None:
+    """Delete only a downloaded model; stop the local server first."""
+    if SERVER.running:
+        raise ValueError("請先停止本地 Sakura 伺服器，再刪除模型")
+    path = next((p for p in installed() if p.name == name), None)
+    if path is None:
+        raise ValueError("找不到已下載的模型")
+    path.unlink()
+
+
 def version_of(file: str) -> str:
     return Model("", file, 0, "").version
 
