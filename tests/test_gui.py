@@ -233,6 +233,18 @@ class Gui(unittest.TestCase):
             core.save_config("sakura", {})
             self.assertEqual(SettingsDialog(self.win).findChild(QTabWidget).currentIndex(), 0)
 
+    def test_local_sakura_defaults_and_saved_slots(self):
+        from yakupatch.gui.settings import SettingsDialog
+        with patch.object(SettingsDialog, "_account", return_value=""):
+            dlg = SettingsDialog(self.win, 1)
+            self.assertEqual((dlg.local_slots.value(), dlg.local_ctx.value()), (8, 2048))
+            dlg.local_slots.setValue(2)
+            dlg.local_ctx.setValue(4096)
+            dlg.save()
+            saved = SettingsDialog(self.win, 1)
+            self.assertEqual((saved.local_slots.value(), saved.local_ctx.value()), (2, 4096))
+            self.assertEqual((core.local_config().slots, core.local_config().ctx_per_slot), (2, 4096))
+
     def test_settings_openai_tab_saves_without_key_in_config(self):
         from yakupatch.backends import openai_compat
         from yakupatch.gui.settings import SettingsDialog
