@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 from . import qa, translate
 from .backends import ConfigError, Refused, TooLong, Transient
-from .exchange import Store, new_run, selectable
+from .exchange import Store, new_run, selectable, read_glossary, write_glossary
 from .fsutil import atomic_write
 
 
@@ -70,11 +70,8 @@ def select(store: Store, limit: int | None = None, only=None) -> list[dict]:
 
 
 def glossary(store: Store) -> dict:
-    path = store.dir / "glossary.tsv"
-    rows = [line.split("\t") for line in path.read_text("utf-8").splitlines()[1:]] if path.exists() else []
     # Dictionary suggestions (source dict:*) are unconfirmed until the user ticks them (§6.10), so they are not enforced.
-    return {r[0]: (r[1], r[2] if len(r) > 2 else "") for r in rows
-            if len(r) > 1 and r[1] and not (len(r) > 3 and r[3].startswith("dict:"))}
+    return {r[0]: (r[1], r[2]) for r in read_glossary(store.dir) if r[1] and not r[3].startswith("dict:")}
 
 
 def style(store: Store) -> str:
@@ -135,21 +132,15 @@ def update_scenes(store: Store, backend, story: dict, wave: list[list[Work]], lo
 
 def update_glossary(store: Store) -> None:
     # shortcut: glossary/cache are outside Store.undo, extend run-aware undo when those artifacts must roll back together.
-    path = store.dir / "glossary.tsv"
-    if not path.exists():
-        return
     translations = {r["src"]: r["dst"] for r in store.records.values()
                     if r["kind"] == "name" and r["status"] in ("translated", "reviewed")}
-    lines = path.read_text("utf-8").splitlines()
-    for i, line in enumerate(lines[1:], 1):
-        cols = line.split("\t")
-        dst = translations.get(cols[0], "")
-        if len(cols) >= 4 and not cols[1] and cols[3] == "seed" and dst and not any(c in dst for c in "\t\r\n"):
-            cols[1] = dst
-            lines[i] = "\t".join(cols)
-    body = "\n".join(lines) + "\n"
-    if body != path.read_text("utf-8"):
-        atomic_write(path, body.encode("utf-8"))
+    rows, changed = read_glossary(store.dir), False
+    for row in rows:
+        dst = translations.get(row[0], "")
+        if not row[1] and row[3] == "seed" and dst and not any(c in dst for c in "\t\r\n"):
+            row[1], changed = dst, True
+    if changed:
+        write_glossary(store.dir, rows)
 
 
 def work_list(store: Store, rows: list[dict], codes: list[str], terms: dict) -> list[Work]:

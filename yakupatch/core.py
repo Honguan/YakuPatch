@@ -11,7 +11,7 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-from . import (__version__, dicts, engines, exchange, extract as extraction, pipeline, translate as text, vfs,
+from . import (__version__, dicts, engines, exchange, extract as extraction, langdetect, pipeline, translate as text, vfs,
                writeback)
 from .backends import AuthRequired, ConfigError, UsageLimit
 from .backends.codex import CodexConfig
@@ -75,28 +75,36 @@ def extract(game: Path, plugin, store: Store, force=False) -> dict:
     return extraction.extract(game, plugin, store, force=force)
 
 
+def _chinese_probe(entry: dict, manifest: dict) -> dict:
+    probes = (entry.get("probe", {}), manifest.get("language_probe", {}),
+              {"primary": entry.get("lang", ""),
+               "packs": ["內建中文"] if entry.get("builtin_chinese") or entry.get("lang") == "packs" else []})
+    return next((p for p in probes if langdetect.has_chinese(p)), {})
+
+
 def translation_blocked(game: Path, plugin, store: Store) -> bool:
     entry = Library().games.get(str(Path(game).resolve()), {})
-    probes = (entry.get("probe", {}), store.manifest.get("language_probe", {}))
-    return bool(entry.get("builtin_chinese") or entry.get("lang") == "packs"
-                or entry.get("lang", "").startswith("zh")
-                or any(p.get("primary", "").startswith("zh") or p.get("packs") for p in probes)
-                or plugin.language_packs(game))
+    return bool(_chinese_probe(entry, store.manifest) or plugin.language_packs(game))
 
 
-def estimate(store: Store, plugin, backend, limit=None, only=None, fresh=False) -> dict:
+def _check_translation(store: Store, plugin, limit, only) -> None:
     if not store.manifest:
         raise ValueError("尚未提取文本，請先執行 extract")
+    if translation_blocked(Path(store.manifest["game_dir"]), plugin, store):
+        raise ValueError("遊戲內已有中文，不需翻譯")
+    pipeline.select(store, limit, only)
+
+
+def estimate(store: Store, plugin, backend, limit=None, only=None, fresh=False, *, prepare=False) -> dict:
+    _check_translation(store, plugin, limit, only)
+    if prepare:
+        backend.prepare()
     return pipeline.estimate(store, plugin.control_codes, backend, limit, only, fresh)
 
 
 def translate(store: Store, plugin, backend, limit=None, progress=None, stop=None, only=None, fresh=False) -> dict:
     """While running, `store.busy` keeps the glossary read-only (pipeline.update_glossary writes it)."""
-    if not store.manifest:
-        raise ValueError("尚未提取文本，請先執行 extract")
-    pipeline.select(store, limit, only)
-    if translation_blocked(Path(store.manifest["game_dir"]), plugin, store):
-        raise ValueError("遊戲內已有中文，不需翻譯")
+    _check_translation(store, plugin, limit, only)
     backend.prepare()
     store.busy = True
     try:
@@ -230,25 +238,14 @@ def _reviewed(rec: dict, dst: str) -> dict:
             "flags": [f for f in rec.get("flags", []) if f != "failed"]}
 
 
-GLOSSARY_HEAD = ["src", "dst", "note", "source"]
-
-
 def glossary(store: Store) -> list[list[str]]:
-    path = store.dir / "glossary.tsv"
-    lines = path.read_text("utf-8").splitlines()[1:] if path.exists() else []
-    return [(line.split("\t") + ["", "", ""])[:4] for line in lines if line]
+    return [r[:4] for r in exchange.read_glossary(store.dir)]
 
 
 def save_glossary(store: Store, rows: list[list[str]]) -> None:
     if getattr(store, "busy", False):
         raise ValueError("翻譯進行中，術語表暫時唯讀")
-    seen = set()
-    for row in rows:
-        if not row[0] or row[0] in seen or any(c in cell for cell in row for c in "\t\r\n"):
-            raise ValueError(f"術語原文不可空白、重複，欄位不可含 Tab 或換行：{row[0]!r}")
-        seen.add(row[0])
-    body = "\t".join(GLOSSARY_HEAD) + "\n" + "".join("\t".join(r) + "\n" for r in rows)
-    atomic_write(store.dir / "glossary.tsv", body.encode("utf-8"))
+    exchange.write_glossary(store.dir, rows)
 
 
 def dict_fill(store: Store) -> int:
@@ -446,12 +443,15 @@ class Library:
                     "reason": "已由使用者確認遊戲內可切換中文"}
         if row["reason"]:
             return {**row, "status": "不支援"}
-        if e.get("lang") == "packs" or e.get("lang", "").startswith("zh"):
-            row.update(no_need=True, reason=_probe_text(e.get("probe", {})))
         plugin = next(p for p in engines.PLUGINS if p.name == e["engine"])
         project = project_dir(game, plugin, home)
-        if (project / "manifest.json").exists():
-            c = counts(Store(project))
+        store = Store(project)
+        probe = _chinese_probe(e, store.manifest)
+        if probe:
+            row.update(no_need=True, reason=_probe_text(probe),
+                       lang=LANG["packs"] if probe.get("packs") else LANG.get(probe["primary"], probe["primary"]))
+        if store.manifest:
+            c = counts(store)
             done = c["translated"] + c["reviewed"]
             todo = done + c["pending"] + c["failed"]
             row["progress"] = round(100 * done / todo) if todo else 100

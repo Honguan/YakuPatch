@@ -13,6 +13,26 @@ from .fsutil import atomic_write
 
 COMPACT_EVERY = 10_000
 BATCH_SIZE = 200
+GLOSSARY_HEAD = ["src", "dst", "note", "source"]
+
+
+def read_glossary(project: Path) -> list[list[str]]:
+    path = project / "glossary.tsv"
+    lines = path.read_text("utf-8").splitlines()[1:] if path.exists() else []
+    rows = [line.split("\t") for line in lines if line]
+    return [r + [""] * max(0, len(GLOSSARY_HEAD) - len(r)) for r in rows]
+
+
+def write_glossary(project: Path, rows: list[list[str]]) -> None:
+    seen = set()
+    for row in rows:
+        if len(row) < 4 or not row[0] or row[0] in seen or any(c in cell for cell in row for c in "\t\r\n"):
+            raise ValueError(f"術語原文不可空白、重複，欄位不可含 Tab 或換行：{row!r}")
+        seen.add(row[0])
+    body = "\t".join(GLOSSARY_HEAD) + "\n" + "".join("\t".join(r) + "\n" for r in rows)
+    atomic_write(project / "glossary.tsv", body.encode("utf-8"))
+
+
 INSTRUCTIONS = """# 翻譯分批檔填寫說明 / Instructions
 
 每個 part-*.jsonl 一行一句（JSON）。請只新增 `dst` 欄位填入譯文，其他欄位保持不變，存到 batches/in/。

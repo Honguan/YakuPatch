@@ -191,12 +191,55 @@ class CoreApi(unittest.TestCase):
         before = snapshot(self.game)
         with patch.object(IdsFake, "prepare", side_effect=AssertionError("must not contact backend")):
             with self.assertRaisesRegex(ValueError, "不需翻譯"):
+                core.estimate(self.store, self.plugin, IdsFake(), prepare=True)
+            with self.assertRaisesRegex(ValueError, "不需翻譯"):
                 core.translate(self.store, self.plugin, IdsFake())
             with self.assertRaises(LanguageGateStop):
                 core.extract(self.game, self.plugin, self.store)
             rows = core.batch([self.game], IdsFake, self.home, apply=True)
         self.assertEqual(rows[0]["status"], "skip")
         self.assertEqual(snapshot(self.game), before)
+
+    def test_library_and_translation_agree_on_manifest_chinese(self):
+        lib = core.Library()
+        key = lib.add(self.game)[0]
+        manifest = {**self.store.manifest, "language_probe": {"primary": "zh-Hant", "packs": []}}
+        self.store.replace(self.store.records, manifest)
+        row = lib.row(key, self.home)
+        self.assertTrue(row["no_need"])
+        self.assertEqual(row["lang"], "繁中")
+        self.assertTrue(core.translation_blocked(self.game, self.plugin, self.store))
+
+    def test_cli_uses_core_translation_and_releases_busy_on_failure(self):
+        from yakupatch import cli
+        backend = IdsFake()
+        with patch.object(cli, "_backend", return_value=backend), \
+                patch.object(core, "translate", wraps=core.translate) as translate:
+            code = cli.main(["--home", str(self.home), "translate", str(self.game), "--limit", "1", "--yes"])
+        self.assertEqual(code, 0)
+        translated_store = translate.call_args.args[0]
+        self.assertFalse(translated_store.busy)
+        with patch.object(core.pipeline, "run", side_effect=RuntimeError("failed")):
+            with self.assertRaisesRegex(RuntimeError, "failed"):
+                core.translate(self.store, self.plugin, backend)
+        self.assertFalse(self.store.busy)
+
+    def test_shared_glossary_preserves_legacy_rows_and_dictionary_review(self):
+        from yakupatch import exchange, pipeline, extract
+        path = self.store.dir / "glossary.tsv"
+        path.write_text("src\tdst\tnote\tsource\n旧語\t舊譯\n候補\t建議\t備註\tdict:test\n新名\t\t\tseed\n", "utf-8")
+        self.assertEqual(core.glossary(self.store)[0], ["旧語", "舊譯", "", ""])
+        self.assertEqual(pipeline.glossary(self.store), {"旧語": ("舊譯", "")})
+        self.store.records["name"] = {"src": "新名", "dst": "新譯", "kind": "name", "status": "translated"}
+        pipeline.update_glossary(self.store)
+        extract.seed_glossary(self.store.dir, {})
+        rows = exchange.read_glossary(self.store.dir)
+        self.assertEqual(rows[2], ["新名", "新譯", "", "seed"])
+        self.assertEqual(rows[1], ["候補", "建議", "備註", "dict:test"])
+        before = path.read_bytes()
+        with self.assertRaises(ValueError):
+            exchange.write_glossary(self.store.dir, rows + [rows[0]])
+        self.assertEqual(path.read_bytes(), before)
 
     def test_cli_single_translation_respects_chinese_mark(self):
         from yakupatch import cli

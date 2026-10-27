@@ -8,7 +8,7 @@ from dataclasses import replace
 from collections import Counter
 from pathlib import Path
 
-from . import core, engines, exchange, pipeline, sakura_kit, writeback
+from . import core, engines, exchange, sakura_kit, writeback
 from .backends import codex, openai_compat
 from .backends.codex import Codex
 from .backends.openai_compat import OpenAICompat, OpenAIConfig
@@ -311,11 +311,8 @@ def _run(args) -> int:
             raise ValueError("尚未提取文本，請先執行 extract")
         if core.translation_blocked(game, plugin, store):
             raise ValueError("遊戲內已有中文，不需翻譯")
-        pipeline.select(store, args.limit)
         backend = _backend(args)
-        if not args.dry_run:
-            backend.prepare()
-        est = pipeline.estimate(store, plugin.control_codes, backend, args.limit)
+        est = core.estimate(store, plugin, backend, args.limit, prepare=not args.dry_run)
         print(f"待翻 {est['items']} 筆、{est['characters']:,} 字，快取 {est['cached']} 筆、"
               f"約 {est['batches']} 批，預估 {est['seconds']} 秒（未計重試；離線槽數未經伺服器確認）。")
         if backend.caps.metered:                         # §6.8: metered backends confirm before spending quota
@@ -325,7 +322,7 @@ def _run(args) -> int:
         if backend.caps.metered and not args.yes and input("開始翻譯？[y/N] ").strip().lower() != "y":
             print("已取消，沒有送出任何請求。")
             return 0
-        result = pipeline.run(store, plugin.control_codes, backend, args.limit,
+        result = core.translate(store, plugin, backend, args.limit,
                               progress=lambda s: print(f"已翻 {s['translated']}、失敗 {s['failed']}", flush=True))
         print(f"翻譯紀錄 {result['run']}：成功 {result['translated']}、失敗 {result['failed']}，耗時 {result['seconds']} 秒")
         for reason, n in result["errors"].items():

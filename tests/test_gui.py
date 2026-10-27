@@ -121,8 +121,9 @@ class Gui(unittest.TestCase):
     def test_one_click_batch_fills_every_stage(self):
         win = self.win
         win.lib_list.item(0).setSelected(True)
+        win.batch_apply.setChecked(True)
         with patch.object(MainWindow, "make_backend", lambda self, name=None: (IdsFake(), "sakura")):
-            win.batch_translate(apply=True)
+            win.batch_translate()
             self.idle()
         self.assertEqual([r["status"] for r in win.batch_job.result], ["ok"])
         self.assertNotEqual(snapshot(self.game), self.original)                   # extracted, translated, written back
@@ -130,6 +131,22 @@ class Gui(unittest.TestCase):
         self.assertTrue(all(bars[n].maximum() and bars[n].value() == bars[n].maximum()
                             for n in ("批次", "提取", "翻譯", "寫回")))
         self.assertGreater(bars["整體"].value(), 0)
+
+    def test_batch_defaults_to_translation_only_and_can_cancel(self):
+        from PySide6.QtWidgets import QPushButton
+        win = self.win
+        win.lib_list.item(0).setSelected(True)
+        button = next(b for b in win.findChildren(QPushButton) if b.text() == "批次翻譯選取遊戲")
+        self.assertFalse(win.batch_apply.isChecked())
+        with patch.object(MainWindow, "make_backend", lambda self, name=None: (IdsFake(), "sakura")):
+            with patch.object(QMessageBox, "question", return_value=QMessageBox.No):
+                button.click()
+            self.assertIsNone(win.batch_job)
+            button.click()
+            self.idle()
+        self.assertGreater(win.batch_job.result[0]["translated"], 0)
+        self.assertEqual(win.batch_job.result[0]["files"], 0)
+        self.assertEqual(snapshot(self.game), self.original)
 
     def test_remove_unsupported_keeps_other_games(self):
         win = self.win
@@ -149,7 +166,7 @@ class Gui(unittest.TestCase):
         self.assertIn("中文包", win.title.text())
         self.assertFalse(win.tabs.isTabEnabled(3))
         with patch.object(MainWindow, "make_backend", side_effect=AssertionError("Chinese game must be skipped")):
-            win.batch_translate(apply=True)
+            win.batch_translate()
             win.start_translation()
         self.assertIsNone(win.batch_job)
 
@@ -263,7 +280,11 @@ class Gui(unittest.TestCase):
         from PySide6.QtWidgets import QTabWidget
         from yakupatch.gui.settings import SettingsDialog
         with patch.object(SettingsDialog, "_account", return_value=""):
-            self.assertEqual(SettingsDialog(self.win).findChild(QTabWidget).currentIndex(), 1)
+            dlg = SettingsDialog(self.win)
+            tabs = dlg.findChild(QTabWidget)
+            self.assertEqual(tabs.currentIndex(), 1)
+            self.assertEqual(tabs.tabText(0), "Sakura 翻譯連線")
+            self.assertEqual(tabs.tabText(1), "本地模型管理（推薦）")
             core.save_config("sakura", {})
             self.assertEqual(SettingsDialog(self.win).findChild(QTabWidget).currentIndex(), 0)
 
