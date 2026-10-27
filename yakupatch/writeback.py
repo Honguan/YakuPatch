@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import vfs
 from .backup import Backup, read_head, remove_created, write_head
-from .encoding import encode
+from .encoding import RAW, encode
 from .engines import EnginePlugin
 from .exchange import Store
 from .fsutil import atomic_write, sha256
@@ -58,7 +58,7 @@ def plan(game_dir: Path, store: Store, plugin: EnginePlugin) -> ApplyPlan:
                 result.warnings.append(f"{rec['id']} 行數與原文不同，保留原文")
                 continue
             try:                                                         # W4 EncodeGuard
-                text.encode(infos[ref["file"]]["encoding"])
+                text.encode(infos[ref["file"]]["encoding"], RAW)
             except UnicodeEncodeError:
                 result.warnings.append(f"{rec['id']} 無法以 {infos[ref['file']]['encoding']} 編碼，保留原文")
                 continue

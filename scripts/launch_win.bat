@@ -5,11 +5,11 @@ setlocal
 cd /d "%~dp0"
 set "PY=%~dp0runtime\python.exe"
 if not exist "%PY%" (
-  echo 找不到 runtime\python.exe，請重新解壓縮 YakuPatch_win.zip 或重新執行安裝腳本。
+  echo runtime\python.exe not found. Unzip YakuPatch_win.zip again or rerun the install script.
   pause
   exit /b 1
 )
-echo 正在檢查套件…
+echo Checking packages...
 echo ^> "%PY%" -m yakupatch.depcheck
 "%PY%" -m yakupatch.depcheck
 if errorlevel 2 (
@@ -17,23 +17,23 @@ if errorlevel 2 (
   exit /b 1
 )
 if errorlevel 1 (
-  choice /c YN /m "是否立即補裝缺少的套件"
+  choice /c YN /m "Install the missing packages now"
   if errorlevel 2 exit /b 1
   echo ^> "%PY%" -m pip install --no-warn-script-location --require-hashes -r requirements.lock
   "%PY%" -m pip install --no-warn-script-location --require-hashes -r requirements.lock
   if errorlevel 1 (
-    echo 補裝失敗，請檢查網路連線後再試。
+    echo Install failed. Check your network connection and try again.
     pause
     exit /b 1
   )
 )
-echo 正在啟動 YakuPatch，第一次啟動可能需要數十秒，請稍候。
+echo Starting YakuPatch. The first start can take a few dozen seconds, please wait.
 echo ^> "%PY%" -m yakupatch.gui
 "%PY%" -m yakupatch.gui
 set "RC=%errorlevel%"
 if not "%RC%"=="0" (
   echo.
-  echo YakuPatch 異常結束（代碼 %RC%），錯誤訊息在上方。
+  echo YakuPatch exited with code %RC%. The error is shown above.
   pause
   exit /b 1
 )

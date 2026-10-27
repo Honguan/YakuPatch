@@ -32,6 +32,8 @@ class CoreApi(unittest.TestCase):
         self.assertTrue(all(r["translated"] > 0 and r["files"] > 0 for r in (results[0], results[2])))
         self.assertNotEqual(snapshot(other), before)                       # extracted, translated and written back
         self.assertEqual({s["index"] for s in seen}, {0, 2})
+        stages = [s["stage"] for s in seen if s["index"] == 2]
+        self.assertEqual((stages[0], stages[1], stages[-1]), ("提取", "翻譯", "寫回"))    # self.game was extracted already
         self.assertEqual(core.batch([self.game], IdsFake, self.home)[0]["translated"], 0)   # nothing left to do
 
     def test_batch_stops_when_the_user_must_act(self):
@@ -142,6 +144,24 @@ class CoreApi(unittest.TestCase):
         self.assertEqual(snapshot(parent), before)                                 # the game is untouched
         with self.assertRaises(ValueError):
             lib.add(parent / "missing-game")
+
+    def test_library_remembers_folders_and_survives_a_bad_game(self):
+        lib = core.Library()
+        parent = Path(tempfile.mkdtemp(prefix="yakupatch-lib-")).resolve()
+        (parent / "0").mkdir()
+        os.replace(self.game, parent / "0" / self.game.name)
+        seen = []
+        with patch.object(core.extraction, "probe", side_effect=AssertionError("failed to load il2cpp")):
+            added = lib.scan(parent, progress=seen.append)
+        self.assertEqual(lib.row(added[0])["status"], "不支援")                    # listed, not a failed scan
+        self.assertEqual(lib.games[added[0]]["unsupported"], "failed to load il2cpp")
+        self.assertEqual([s["stage"] for s in seen], ["尋找遊戲", "掃描"])
+        self.assertEqual(core.Library().folders, [str(parent)])
+        lib.remove_many(added)
+        self.assertEqual(lib.rescan(), added)                                      # the remembered folder again
+        self.assertEqual(lib.games[added[0]]["unsupported"], "")
+        lib.forget_folder(str(parent))
+        self.assertEqual(core.Library().folders, [])
 
     def test_language_gate_force_and_launch_without_exe(self):
         with patch("yakupatch.extract.language_gate", return_value={"primary": "zh-Hans", "kana_ratio": 0,

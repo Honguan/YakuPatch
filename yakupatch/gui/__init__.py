@@ -12,19 +12,19 @@ def main() -> int:
         log.parent.mkdir(parents=True, exist_ok=True)
         sys.stderr = open(log, "a", encoding="utf-8", buffering=1)
     faulthandler.enable(sys.stderr)
-    print("載入介面元件（PySide6）…", flush=True)
+    print("Loading the GUI toolkit (PySide6)...", flush=True)
     from PySide6.QtGui import QIcon
     from PySide6.QtWidgets import QApplication
 
     from .window import MainWindow
 
-    print("建立主視窗…", flush=True)
+    print("Creating the main window...", flush=True)
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("YakuPatch")
     app.setWindowIcon(QIcon(str(Path(__file__).with_name("icon.ico"))))
     window = MainWindow()
     window.show()
-    print("主視窗已開啟。關閉這個命令列視窗會一併關閉 YakuPatch。", flush=True)
+    print("Main window is open. Closing this console window also closes YakuPatch.", flush=True)
     window.check_update()
     window.autostart_sakura()
     return app.exec()

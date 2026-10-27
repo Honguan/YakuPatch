@@ -20,32 +20,32 @@ def problems(lock: Path = LOCK) -> list[str]:
         try:
             have = metadata.version(name)
         except metadata.PackageNotFoundError:
-            out.append(f"{name}：未安裝（需要 {want}）")
+            out.append(f"{name}: not installed (needs {want})")
             continue
         if have != want:
-            out.append(f"{name}：版本 {have}（需要 {want}）")
+            out.append(f"{name}: version {have} (needs {want})")
     return out
 
 
 def main() -> int:
     if not LOCK.is_file():
-        print("找不到 requirements.lock，請重新下載 YakuPatch。")
+        print("requirements.lock not found. Download YakuPatch again.")
         return 1
     pins = re.findall(r"^([A-Za-z0-9_.\-]+)==(\S+)", LOCK.read_text(encoding="utf-8"), re.M)
-    print(f"依 {LOCK.name} 檢查 {len(pins)} 個套件：" + "、".join(f"{n} {v}" for n, v in pins))
+    print(f"Checking {len(pins)} packages in {LOCK.name}: " + ", ".join(f"{n} {v}" for n, v in pins))
     found = problems()
     if found:
-        print("缺少或版本不符的套件：")
+        print("Missing or wrong-version packages:")
         print("\n".join("  " + p for p in found))
         return 1
     try:
         from PySide6 import QtWidgets  # noqa: F401
     except ImportError as ex:
-        print(f"無法載入介面元件：{ex}")
-        print("通常是缺少 Microsoft Visual C++ 可轉散發套件（x64），請下載安裝後再啟動：")
+        print(f"Cannot load the GUI toolkit: {ex}")
+        print("This usually means the Microsoft Visual C++ Redistributable (x64) is missing. Install it and start again:")
         print(VC_REDIST)
         return 2
-    print("套件版本都正確，介面元件可以載入。")
+    print("All packages match and the GUI toolkit loads.")
     return 0
 
 

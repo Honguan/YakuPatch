@@ -119,6 +119,27 @@ class Gui(unittest.TestCase):
         proxy.set(status="", query="譯")
         self.assertEqual(proxy.rowCount(), 1)
 
+    def test_one_click_batch_fills_every_stage(self):
+        win = self.win
+        win.lib_list.item(0).setSelected(True)
+        with patch.object(MainWindow, "make_backend", lambda self, name=None: (IdsFake(), "sakura")):
+            win.batch_translate(apply=True)
+            self.idle()
+        self.assertEqual([r["status"] for r in win.batch_job.result], ["ok"])
+        self.assertNotEqual(snapshot(self.game), self.original)                   # extracted, translated, written back
+        bars = win.stages.bars
+        self.assertTrue(all(bars[n].maximum() and bars[n].value() == bars[n].maximum()
+                            for n in ("批次", "提取", "翻譯", "寫回")))
+        self.assertGreater(bars["整體"].value(), 0)
+
+    def test_remove_unsupported_keeps_other_games(self):
+        win = self.win
+        win.lib.games["Z:/broken"] = {"engine": "rpgmaker_mz", "lang": "", "probe": {}, "unsupported": "boom"}
+        win.refresh_library()
+        win.remove_where(lambda r: r["status"] == "不支援", "不支援")
+        self.assertEqual(list(win.lib.games), [self.key])
+        self.assertEqual(win.lib_list.count(), 1)
+
     def test_full_flow_through_gui(self):
         win = self.win
         win.extract()

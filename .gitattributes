@@ -1,2 +1,5 @@
+# Text files are stored and checked out with LF; cmd needs CRLF in batch files.
+* text=auto eol=lf
 *.bat text eol=crlf
+*.cmd text eol=crlf
 tests/fixtures/** -text

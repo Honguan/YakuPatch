@@ -3,11 +3,12 @@
 Long work runs on core.JobQueue threads; results and Store changes come back through Qt signals."""
 import threading
 import time
+import urllib.request
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QKeySequence, QShortcut
-from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QComboBox, QFileDialog, QFormLayout, QGridLayout,
+from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QComboBox, QDialog, QFileDialog, QFormLayout, QGridLayout,
                                QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem,
                                QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSizePolicy,
@@ -41,6 +42,47 @@ def qa_text(reason: str, store) -> str:
     return reason
 
 
+def _name(game: Path) -> str:
+    return game.parent.name if game.name.lower() == "www" else game.name
+
+
+class StageBars(QGroupBox):
+    """Progress on the translate tab: the game as a whole, the batch, and each stage of the running work."""
+    NAMES = ("整體", "批次", "提取", "翻譯", "寫回")
+
+    def __init__(self):
+        super().__init__(tr("進度"))
+        grid = QGridLayout(self)
+        self.bars, self.labels, self.rows = {}, {}, {}
+        for row, name in enumerate(self.NAMES):
+            head, bar, label = QLabel(tr(name)), QProgressBar(textVisible=False), QLabel()
+            for col, w in enumerate((head, bar, label)):
+                grid.addWidget(w, row, col)
+            self.bars[name], self.labels[name], self.rows[name] = bar, label, (head, bar, label)
+        grid.setColumnStretch(1, 1)
+        self.show_batch(False)
+
+    def set(self, name, value, maximum, text=""):
+        self.bars[name].setRange(0, max(maximum, 1))
+        self.bars[name].setValue(min(value, max(maximum, 1)))
+        self.labels[name].setText(text)
+
+    def busy(self, name, text):
+        self.bars[name].setRange(0, 0)               # an animated bar: the step reports no count
+        self.labels[name].setText(text)
+
+    def is_busy(self, name) -> bool:
+        return self.bars[name].maximum() == 0
+
+    def clear(self, *names):
+        for name in names:
+            self.set(name, 0, 1)
+
+    def show_batch(self, on: bool):
+        for w in self.rows["批次"]:
+            w.setVisible(on)
+
+
 class Bridge(QObject):
     """Store and job callbacks fire on worker threads; signals queue them onto the GUI thread."""
     store_changed = Signal(str, object)
@@ -68,14 +110,18 @@ class MainWindow(QMainWindow):
         self.key = None
         self.plan = None
         self.backend_info = {}
+        self.rows: dict[str, dict] = {}            # key -> library row as last shown
+        self.batch_job = None
+        self.batch_index = None
         self._dirty = QTimer(self, singleShot=True, interval=300, timeout=self._refresh_counts)
         self._build()
         self.refresh_library()
 
     def check_update(self):
         """Look for a newer release in the background; only a status-bar link, nothing is downloaded."""
+        proxies = urllib.request.getproxies()       # here, not on the thread: see core.newer_release
         def run():
-            found = core.newer_release()
+            found = core.newer_release(proxies=proxies)
             if found:
                 self.bridge.update_found.emit(*found)
 
@@ -104,7 +150,8 @@ class MainWindow(QMainWindow):
     def _build(self):
         bar = self.addToolBar(tr("主要"))
         bar.setMovable(False)
-        for text, slot in ((tr("＋加入遊戲"), self.add_game), (tr("掃描資料夾"), self.scan_folder)):
+        for text, slot in ((tr("＋加入遊戲"), self.add_game), (tr("掃描資料夾"), lambda: self.scan_folder()),
+                           (tr("重新掃描"), self.rescan), (tr("掃描資料夾清單"), self.manage_folders)):
             bar.addAction(QAction(text, self, triggered=slot))
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -125,8 +172,16 @@ class MainWindow(QMainWindow):
         self.lib_list.currentItemChanged.connect(lambda item, _: item and self.select_game(item.data(Qt.UserRole)))
         self.lib_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.lib_list.customContextMenuRequested.connect(self._library_menu)
-        for w in (QLabel(tr("遊戲庫")), self.search, self.lib_filter, self.lib_list):
+        for w in (QLabel(tr("遊戲庫（可按 Ctrl／Shift 多選）")), self.search, self.lib_filter, self.lib_list):
             lv.addWidget(w)
+        buttons = QGridLayout()
+        for n, (text, slot) in enumerate((
+                (tr("移除不需翻譯"), lambda: self.remove_where(lambda r: r["no_need"], tr("不需翻譯"))),
+                (tr("移除不支援"), lambda: self.remove_where(lambda r: r["status"] == tr("不支援"), tr("不支援"))),
+                (tr("翻譯選取"), lambda: self.batch_translate(apply=False)),
+                (tr("一鍵提取→翻譯→寫回"), lambda: self.batch_translate(apply=True)))):
+            buttons.addWidget(QPushButton(text, clicked=slot), n // 2, n % 2)
+        lv.addLayout(buttons)
 
         right = QWidget()
         rv = QVBoxLayout(right)
@@ -159,7 +214,9 @@ class MainWindow(QMainWindow):
         self.job_label = QLabel(tr("工作佇列：沒有工作"))
         self.job_pause = QPushButton(tr("暫停"), clicked=self.pause_job)
         self.job_cancel = QPushButton(tr("取消"), clicked=self.cancel_job)
+        self.job_bar = QProgressBar(maximumWidth=240, visible=False)
         jobs.addWidget(self.job_label, 1)
+        jobs.addWidget(self.job_bar)
         jobs.addWidget(self.job_pause)
         jobs.addWidget(self.job_cancel)
         cv.addLayout(jobs)
@@ -315,7 +372,7 @@ class MainWindow(QMainWindow):
         for b in (self.start_button, self.pause_button, self.resume_button, self.cancel_button):
             ctl.addWidget(b)
         v.addLayout(ctl)
-        self.progress = QProgressBar()
+        self.stages = StageBars()
         self.progress_label = QLabel()
         self.action_box = QWidget()
         ab = QHBoxLayout(self.action_box)
@@ -326,7 +383,7 @@ class MainWindow(QMainWindow):
         ab.addWidget(self.action_label, 1)
         ab.addWidget(self.action_button)
         self.action_box.hide()
-        for x in (self.progress, self.progress_label, self.action_box):
+        for x in (self.stages, self.progress_label, self.action_box):
             v.addWidget(x)
         v.addWidget(QLabel(tr("翻譯歷史（撤銷不還原術語表與快取）")))
         self.history = QTableWidget(0, 6)
@@ -376,19 +433,39 @@ class MainWindow(QMainWindow):
         live = [j for j in self.jobs if j.state in ("queued", "running")]
         self.jobs = live + [j for j in self.jobs if j.state == "paused"][-5:]
         if live:
-            parts = []
-            for j in live:
-                p = j.progress
-                parts.append(f"{j.label} " + (f"{p['index'] + 1}/{p['of']} · " if "of" in p else "") + (tr("排隊中") if j.state == "queued" else
-                                              f"{p.get('translated', 0) + p.get('failed', 0)}/{p.get('total', '?')}"
-                                              + (f" · {tr('失敗')} {p['failed']}" if p.get("failed") else "")
-                                              if p else tr("進行中")))
-            self.job_label.setText(tr("工作佇列：") + "；".join(parts))
+            self.job_label.setText(tr("工作佇列：") + "；".join(self._job_text(j) for j in live))
+            p = live[0].progress
+            done, total = (p["index"], p["of"]) if "of" in p else (p.get("translated", 0) + p.get("failed", 0),
+                                                                     p.get("total", 0))
+            self.job_bar.setRange(0, total if live[0].state == "running" and total else 0)
+            self.job_bar.setValue(done)
         else:
             self.job_label.setText(tr("工作佇列：沒有進行中的工作"))
+        self.job_bar.setVisible(bool(live))
         if self.translation and job is self.translation[0]:
             self._show_progress(job)
+        if job is self.batch_job:
+            self._show_batch(job)
         self._translation_buttons()
+
+    @staticmethod
+    def _job_text(j) -> str:
+        p = j.progress
+        if j.state == "queued":
+            return f"{j.label} {tr('排隊中')}"
+        bits = [j.label]
+        if "of" in p:
+            bits.append(f"{p['index'] + 1}/{p['of']}")
+        if p.get("game"):
+            bits.append(_name(Path(p["game"])))
+        if "total" in p:
+            bits.append(f"{p.get('translated', 0) + p.get('failed', 0)}/{p['total']}"
+                        + (f" {tr('失敗')} {p['failed']}" if p.get("failed") else ""))
+        elif p.get("stage"):
+            bits.append(tr(p["stage"]))
+        elif not p:
+            bits.append(tr("進行中"))
+        return " · ".join(bits)
 
     def _error(self, job, what) -> bool:
         if job.error is None:
@@ -402,14 +479,67 @@ class MainWindow(QMainWindow):
         if path:
             self.run_bg(lambda job: self.lib.add(Path(path)), self._library_done, tr("加入遊戲"))
 
-    def scan_folder(self):
-        path = QFileDialog.getExistingDirectory(self, tr("選擇上層資料夾"))
+    def scan_folder(self, path=None):
+        """The folder is remembered, so「重新掃描」scans it again with the others."""
+        path = path or QFileDialog.getExistingDirectory(self, tr("選擇上層資料夾"))
         if path:
-            self.run_bg(lambda job: self.lib.scan(Path(path)), self._library_done, tr("掃描資料夾"))
+            self.run_bg(lambda job: self.lib.scan(Path(path), progress=job.report, stop=job.stop), self._library_done,
+                        tr("掃描資料夾"))
+
+    def rescan(self):
+        if not self.lib.folders:
+            QMessageBox.information(self, "YakuPatch", tr("還沒有掃描過的資料夾，請先按「掃描資料夾」。"))
+            return
+        self.run_bg(lambda job: self.lib.rescan(progress=job.report, stop=job.stop), self._library_done,
+                    tr("重新掃描 {} 個資料夾").format(len(self.lib.folders)))
+
+    def manage_folders(self):
+        dlg = QDialog(self, windowTitle=tr("掃描資料夾清單"))
+        v = QVBoxLayout(dlg)
+        v.addWidget(QLabel(tr("「重新掃描」會依序掃描這些資料夾。移除只是不再掃描，已加入遊戲庫的遊戲會保留。"), wordWrap=True))
+        folders = QListWidget()
+        folders.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        folders.addItems(self.lib.folders)
+        v.addWidget(folders)
+
+        def add():
+            path = QFileDialog.getExistingDirectory(dlg, tr("選擇上層資料夾"))
+            if path:
+                dlg.accept()
+                self.scan_folder(path)
+
+        def remove():
+            for item in folders.selectedItems():
+                self.lib.forget_folder(item.text())
+                folders.takeItem(folders.row(item))
+
+        row = QHBoxLayout()
+        for text, slot in ((tr("新增並掃描"), add), (tr("移除選取"), remove), (tr("全部重新掃描"), lambda: (dlg.accept(), self.rescan())),
+                           (tr("關閉"), dlg.reject)):
+            row.addWidget(QPushButton(text, clicked=slot))
+        v.addLayout(row)
+        dlg.resize(560, 320)
+        dlg.exec()
 
     def _library_done(self, job):
         if not self._error(job, tr("加入失敗")):
-            self.statusBar().showMessage(tr("已加入 {} 款遊戲").format(len(job.result)), 5000)
+            bad = sum(1 for k in job.result if self.lib.games.get(k, {}).get("unsupported"))
+            self.statusBar().showMessage(tr("已加入或更新 {} 款遊戲，其中不支援 {} 款（游標移到遊戲上可看原因）").format(
+                len(job.result), bad), 8000)
+        self.refresh_library()
+
+    def remove_where(self, match, what):
+        keys = [r["key"] for r in self.rows.values() if match(r)]
+        if not keys:
+            QMessageBox.information(self, "YakuPatch", tr("沒有「{}」的遊戲").format(what))
+            return
+        if QMessageBox.question(self, "YakuPatch", tr("從遊戲庫移除 {} 款「{}」的遊戲？遊戲檔案與翻譯資料都會保留，"
+                                                      "重新掃描時會再加入。").format(len(keys), what)) != QMessageBox.Yes:
+            return
+        self.lib.remove_many(keys)
+        if self.key in keys:
+            self.key = None
+            self.tabs.setEnabled(False)
         self.refresh_library()
 
     def refresh_library(self):
@@ -427,6 +557,7 @@ class MainWindow(QMainWindow):
                 row["status"] = tr("翻譯中")
             rows.append(row)
         rows.sort(key=lambda r: (r["no_need"] or r["status"] == "不支援", r["name"].lower()))
+        self.rows = {r["key"]: r for r in rows}
         self.lib_list.blockSignals(True)
         self.lib_list.clear()
         for r in rows:
@@ -456,12 +587,18 @@ class MainWindow(QMainWindow):
         menu.addAction(tr("移除（只移除專案，不刪遊戲）"), lambda: self.remove_game(key))
         menu.addSeparator()
         menu.addAction(tr("批次翻譯選取的遊戲（{} 款）").format(len(self.lib_list.selectedItems()) or 1),
-                       self.batch_translate)
+                       lambda: self.batch_translate())
         menu.exec(self.lib_list.mapToGlobal(pos))
 
-    def batch_translate(self):
-        """F16: extract → translate → optionally apply each selected game, in one queued job."""
-        keys = [i.data(Qt.UserRole) for i in self.lib_list.selectedItems()] or [self.lib_list.currentItem().data(Qt.UserRole)]
+    def batch_translate(self, apply=None):
+        """F16: extract → translate → optionally apply each selected game, in one queued job.
+        `apply` None asks whether to write back; the library buttons pass it."""
+        keys = [i.data(Qt.UserRole) for i in self.lib_list.selectedItems()]
+        if not keys and self.lib_list.currentItem():
+            keys = [self.lib_list.currentItem().data(Qt.UserRole)]
+        if not keys:
+            QMessageBox.information(self, "YakuPatch", tr("請先在左側選取要翻譯的遊戲（可按 Ctrl／Shift 多選）"))
+            return
         try:
             backend, name = self.make_backend()
             opened = {}
@@ -482,20 +619,61 @@ class MainWindow(QMainWindow):
             self.backend_combo.currentText(), len(keys))
         if backend.caps.metered:
             msg += "\n" + tr("這是計費後端，批次不會逐款顯示用量預估。")
-        box = QMessageBox(QMessageBox.Question, tr("批次翻譯"), msg + "\n\n" + tr("翻譯完成後要直接寫回遊戲嗎？（原檔會先備份）"))
-        apply_btn = box.addButton(tr("翻譯並寫回"), QMessageBox.AcceptRole)
-        only_btn = box.addButton(tr("只翻譯"), QMessageBox.AcceptRole)
-        box.addButton(QMessageBox.Cancel)
-        box.exec()
-        if box.clickedButton() not in (apply_btn, only_btn):
-            return
-        apply = box.clickedButton() is apply_btn
+        if apply is None:
+            box = QMessageBox(QMessageBox.Question, tr("批次翻譯"), msg + "\n\n" + tr("翻譯完成後要直接寫回遊戲嗎？（原檔會先備份）"))
+            apply_btn = box.addButton(tr("翻譯並寫回"), QMessageBox.AcceptRole)
+            only_btn = box.addButton(tr("只翻譯"), QMessageBox.AcceptRole)
+            box.addButton(QMessageBox.Cancel)
+            box.exec()
+            if box.clickedButton() not in (apply_btn, only_btn):
+                return
+            apply = box.clickedButton() is apply_btn
+        else:
+            msg += "\n" + (tr("完成後直接寫回遊戲（原檔會先備份）。") if apply else tr("只翻譯，不寫回遊戲。"))
+            if QMessageBox.question(self, tr("批次翻譯"), msg + "\n\n" + tr("開始？")) != QMessageBox.Yes:
+                return
 
         def work(job):
             return core.batch(keys, lambda: self.make_backend(name)[0], self.home, apply=apply, progress=job.report,
                               stop=job.stop, opener=lambda key: opened.get(key) or core.open_game(Path(key), self.home))
 
-        self.run_bg(work, self._batch_done, tr("批次翻譯 {} 款").format(len(keys)), key=name)
+        self.batch_index = None
+        self.stages.clear("批次", "提取", "翻譯", "寫回")
+        self.stages.show_batch(True)
+        self.batch_job = self.run_bg(work, self._batch_done, tr("批次翻譯 {} 款").format(len(keys)), key=name)
+        if self.key:
+            self.tabs.setCurrentIndex(3)
+
+    def _show_batch(self, job):
+        """Batch bar: games done of all; stage bars: the game being worked on."""
+        s, p = self.stages, job.progress
+        if job.state not in ("queued", "running"):
+            for name in ("提取", "翻譯", "寫回"):
+                if s.is_busy(name):
+                    s.set(name, job.state == "done", 1, tr("完成") if job.state == "done" else tr("已中斷"))
+            if job.state == "done":
+                s.set("批次", len(job.result), len(job.result), tr("完成 {} 款").format(len(job.result)))
+            return
+        if "of" not in p:
+            return
+        if p["index"] != self.batch_index:
+            self.batch_index = p["index"]
+            s.clear("提取", "翻譯", "寫回")
+        s.set("批次", p["index"], p["of"], tr("第 {}／{} 款：{}").format(p["index"] + 1, p["of"], _name(Path(p["game"]))))
+        if p["stage"] == "提取":
+            s.busy("提取", tr("提取中"))
+            return
+        if s.is_busy("提取") or not s.bars["提取"].value():
+            s.set("提取", 1, 1, tr("完成"))
+        if p["stage"] == "翻譯":
+            if "total" in p:
+                done = p.get("translated", 0) + p.get("failed", 0)
+                s.set("翻譯", done, p["total"], tr("{}/{} 句，失敗 {}").format(done, p["total"], p.get("failed", 0)))
+            else:
+                s.busy("翻譯", tr("準備中"))
+        elif p["stage"] == "寫回":
+            s.set("翻譯", 1, 1, tr("完成"))
+            s.busy("寫回", tr("寫回中"))
 
     def _batch_done(self, job):
         self.refresh_library()
@@ -550,6 +728,9 @@ class MainWindow(QMainWindow):
         self.wb_table.setRowCount(0)
         self.wb_notes.clear()
         self.apply_button.setEnabled(False)
+        if not (self.batch_job and self.batch_job.state in ("queued", "running")):
+            self.stages.clear("提取", "翻譯", "寫回")
+            self.stages.show_batch(False)
         self.load_glossary()
         self._refresh_counts()
 
@@ -573,6 +754,8 @@ class MainWindow(QMainWindow):
         extracted, applied = bool(store.manifest), bool(core.Backup(game).files)
         todo = c["translated"] + c["reviewed"] + c["pending"] + c["failed"]
         pct = round(100 * (c["translated"] + c["reviewed"]) / todo) if todo else 0
+        self.stages.set("整體", c["translated"] + c["reviewed"], todo, tr("已翻 {}／可翻 {}（{}%）").format(
+            c["translated"] + c["reviewed"], todo, pct))
         self.title.setText(f"{game.name if game.name.lower() != 'www' else game.parent.name}    "
                            f"{plugin.name}  [{core.LANG.get(entry.get('lang'), entry.get('lang', '—'))}]")
         marks = [True, bool(probe), extracted, extracted and c["pending"] + c["failed"] == 0 and todo > 0, applied]
@@ -622,8 +805,10 @@ class MainWindow(QMainWindow):
             elif not self._error(job, tr("提取失敗")):
                 self.statusBar().showMessage(tr("提取完成"), 5000)
                 self.select_game_refresh()
+            self.stages.set("提取", job.error is None, 1, tr("完成") if job.error is None else tr("未完成"))
             self._refresh_counts()
 
+        self.stages.busy("提取", tr("提取中"))
         self.run_bg(lambda job: core.extract(game, plugin, store, force), done, tr("提取"))
 
     def select_game_refresh(self):
@@ -916,8 +1101,7 @@ class MainWindow(QMainWindow):
         p = job.progress
         total = p.get("total") or 0
         done = p.get("translated", 0) + p.get("failed", 0)
-        self.progress.setMaximum(max(total, 1))
-        self.progress.setValue(done)
+        self.stages.set("翻譯", done, total, tr("{}/{} 句，失敗 {}").format(done, total, p.get("failed", 0)))
         elapsed = time.monotonic() - getattr(job, "started", time.monotonic())
         rate = done / elapsed * 60 if elapsed > 1 and done else 0
         left = (total - done) / rate if rate else 0
@@ -1082,9 +1266,11 @@ class MainWindow(QMainWindow):
         def done(job):
             if not self._error(job, tr("寫回失敗，遊戲未被修改")):
                 self.statusBar().showMessage(tr("寫回完成"), 5000)
+            self.stages.set("寫回", job.error is None, 1, tr("完成") if job.error is None else tr("未完成"))
             self.refresh_library()
             self._refresh_counts()
 
+        self.stages.busy("寫回", tr("寫回中"))
         self.run_bg(lambda job: core.apply(game, plan), done, tr("寫回"))
 
     def restore(self):

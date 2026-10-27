@@ -53,11 +53,16 @@ class _Context:
         self.env = UnityPy.Environment()
         for p in _files(game_dir):                  # from bytes: an open file could not be replaced on Windows
             self.env.load_file(p.read_bytes(), name=str(p))
+        if not self.env.objects:
+            raise ValueError("讀不到任何 Unity 資源（檔案可能已加密或使用未支援的格式）")
         self.version = self.env.objects[0].assets_file.unity_version
         self.scripts = {(Path(f.name).name, o.path_id): o for f in self.env.files.values()
                         for o in getattr(f, "objects", {}).values() if o.type.name == "MonoScript"}
         self.gen = TypeTreeGenerator(self.version)
-        self.gen.load_local_game(str(game_dir))
+        try:
+            self.gen.load_local_game(str(game_dir))
+        except AssertionError:                  # e.g. "failed to load il2cpp": scripts without a stored tree are skipped
+            self.gen = None
         self.nodes: dict[tuple, object] = {}
         self.data = data
 
@@ -78,6 +83,8 @@ class _Context:
             return cls, obj.read_typetree(), None
         if ms is None:
             raise ValueError("找不到 MonoScript")
+        if self.gen is None:
+            raise ValueError("無法載入遊戲的程式碼（IL2CPP），無法讀取此腳本")
         key = (ms.m_AssemblyName, ms.m_Namespace, cls)
         if key not in self.nodes:
             from UnityPy.helpers.TypeTreeNode import TypeTreeNode
