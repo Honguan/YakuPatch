@@ -126,7 +126,7 @@ class SettingsDialog(QDialog):
         form = QFormLayout()
         self.local_model = QComboBox()
         self.local_port = QSpinBox(minimum=1, maximum=65535, value=int(saved.get("port", 8080)))
-        self.local_slots = QSpinBox(minimum=1, maximum=16, value=int(saved.get("slots", 4)))
+        self.local_slots = QSpinBox(minimum=1, maximum=16, value=int(saved.get("slots", sakura_kit.LocalConfig().slots)))
         self.local_ctx = QSpinBox(minimum=512, maximum=32768, singleStep=512, value=int(saved.get("ctx_per_slot", 2048)))
         self.local_ngl = QSpinBox(minimum=0, maximum=999, value=int(saved.get("gpu_layers", 999)))
         self.local_lan = QCheckBox(tr("允許區網連線（其他電腦可使用這台的模型；請只在信任的網路開啟）"),

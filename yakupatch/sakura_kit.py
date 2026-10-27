@@ -36,7 +36,7 @@ class LocalConfig:
     model: str = ""                  # file name under models/
     port: int = 8080
     gpu_layers: int = 999
-    slots: int = 4
+    slots: int = 8
     ctx_per_slot: int = 2048
     lan: bool = False                # listen on 0.0.0.0 instead of 127.0.0.1
     autostart: bool = False
@@ -130,7 +130,8 @@ def _ram() -> int:
 
 
 def need(model: Model) -> int:
-    """Weights plus KV cache and buffers for 4 slots × 2048 context (measured headroom, rounded up)."""
+    """Weights plus headroom for 8 × 2048 Q8 KV and micro-batch 512; an estimate, not a memory guarantee."""
+    # 7B v3.7 measured about 7.05 GiB total on an 8 GiB CUDA GPU; keep the rounded-up margin for other models.
     return model.size + (int(1.5 * GIB) if model.size < 6 * GIB else int(2.5 * GIB))
 
 
@@ -258,6 +259,7 @@ def installed_llama() -> Path | None:
 def server_args(exe: Path, model: Path, cfg: LocalConfig) -> list[str]:
     return [str(exe), "-m", str(model), "--host", "0.0.0.0" if cfg.lan else "127.0.0.1", "--port", str(cfg.port),
             "-ngl", str(cfg.gpu_layers), "-np", str(cfg.slots), "-c", str(cfg.slots * cfg.ctx_per_slot),
+            "-ctk", "q8_0", "-ctv", "q8_0", "-b", "2048", "-ub", "512", "-fa", "on",
             "-a", model.stem]
 
 
@@ -328,7 +330,7 @@ START_BAT = """@echo off
 rem YakuPatch Sakura server kit. Listens on the local network so YakuPatch on another PC can use this GPU.
 cd /d "%~dp0"
 echo Sakura server: http://%COMPUTERNAME%:{port}/v1  (YakuPatch: Settings - Sakura - API address)
-"{exe}" -m "models\\{model}" --host 0.0.0.0 --port {port} -ngl 999 -np 4 -c 8192 -a {alias}
+{command}
 pause
 """
 README = """YakuPatch Sakura 啟動包
@@ -352,7 +354,7 @@ def export_kit(dest: Path, model: Model, variant: str, port: int = 8080, progres
     elif not target.exists():
         download_model(model, dest / "models", progress and (lambda d, t: progress(d, t, model.file)), stop)
     exe = server_exe(llama).relative_to(dest)
-    atomic_write(dest / "start_sakura.bat", START_BAT.format(exe=exe, model=model.file, port=port,
-                                                             alias=Path(model.file).stem).replace("\n", "\r\n").encode("utf-8"))
+    command = subprocess.list2cmdline(server_args(exe, Path("models") / model.file, LocalConfig(port=port, lan=True)))
+    atomic_write(dest / "start_sakura.bat", START_BAT.format(command=command, port=port).replace("\n", "\r\n").encode("utf-8"))
     atomic_write(dest / "README.txt", README.format(port=port, version=model.version, model=model.file).encode("utf-8"))
     return dest

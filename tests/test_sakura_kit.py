@@ -114,6 +114,39 @@ class SakuraKit(unittest.TestCase):
         with self.assertRaises(ValueError):
             kit.LocalConfig(port=0)
 
+    def test_server_defaults_and_saved_overrides(self):
+        from yakupatch import core
+        with patch.object(core, "config_path", return_value=self.tmp / "config.json"):
+            cfg = core.local_config()
+            args = kit.server_args(Path("server.exe"), Path("m.gguf"), cfg)
+            for flag, value in {"-np": "8", "-c": "16384", "-ctk": "q8_0", "-ctv": "q8_0",
+                                "-b": "2048", "-ub": "512", "-fa": "on", "-ngl": "999"}.items():
+                self.assertEqual(args[args.index(flag) + 1], value, flag)
+            core.save_config("sakura_local", {"slots": 2, "ctx_per_slot": 4096, "gpu_layers": 0, "port": 8081})
+            cfg = core.local_config()
+            args = kit.server_args(Path("server.exe"), Path("m.gguf"), cfg)
+            for flag, value in {"-np": "2", "-c": "8192", "-ngl": "0", "--port": "8081"}.items():
+                self.assertEqual(args[args.index(flag) + 1], value, flag)
+
+    def test_export_kit_uses_server_defaults(self):
+        dest = self.tmp / "portable kit"
+        llama = dest / "llama"
+        llama.mkdir(parents=True)
+        (llama / "llama-server.exe").touch()
+        local = self.tmp / "models" / "model with spaces.gguf"
+        local.parent.mkdir()
+        local.write_bytes(b"model")
+        with patch.object(kit, "home", return_value=self.tmp), \
+                patch.object(kit, "install_llama", return_value=llama):
+            kit.export_kit(dest, kit.Model("repo", local.name, 5, ""), "cuda", port=8081)
+        bat = (dest / "start_sakura.bat").read_bytes()
+        self.assertEqual(bat.count(b"\n"), bat.count(b"\r\n"))
+        command = bat.decode("utf-8")
+        for option in ("-np 8", "-c 16384", "-ctk q8_0", "-ctv q8_0", "-b 2048", "-ub 512", "-fa on",
+                       "--host 0.0.0.0", "--port 8081", '"models\\model with spaces.gguf"'):
+            self.assertIn(option, command)
+        self.assertEqual((dest / "models" / local.name).read_bytes(), b"model")
+
 
 if __name__ == "__main__":
     unittest.main()

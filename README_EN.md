@@ -80,6 +80,7 @@
 
 * **Step 2: Set up a backend**
   * **Local Sakura (recommended)**: open Settings → 本地 Sakura (Local Sakura), select the model marked 推薦 (Recommended) and click 下載選取的模型 (Download), then 下載最新 llama.cpp (Download llama.cpp), then 啟動伺服器 (Start server). The Sakura address fills in automatically; tick 啟動 YakuPatch 時自動開啟伺服器 (Start with YakuPatch) to skip this next time.
+  * Local Sakura and exported kits default to 8 slots, 2048 context per slot, Q8 K/V cache, batch 2048, micro-batch 512, and Flash Attention. Saved slot and context settings are preserved. If memory is insufficient, lower the slot count under 本地 Sakura; for exported kits, edit `-np` and `-c` (slots × context per slot) in `start_sakura.bat`. VRAM recommendations are estimates; actual usage depends on the model and hardware.
   * **Run the model on another PC**: in 本地 Sakura, enter that PC's VRAM, select a model and click 匯出啟動包… (Export kit). Copy the folder over, double-click `start_sakura.bat`, then on this PC enter `http://<that PC's IP>:8080/v1` under Settings → Sakura and click 測試連線 (Test connection).
   * **Other backends**: sign in under Settings → Codex, or enter an API address, key and model under Settings → OpenAI 相容 (OpenAI-compatible).
 
