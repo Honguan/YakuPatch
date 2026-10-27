@@ -109,6 +109,57 @@ class KiriKiriPatch(unittest.TestCase):
         with self.assertRaises(LanguageGateStop):
             core.extract(self.game, self.plugin, self.store)
 
+    def test_language_switch_readme_marks_unreadable_game(self):
+        (self.game / "data.xp3").write_bytes(vfs.Xp3.write({"startup.tjs": b"TJS2100\0"}))
+        (self.game / "readme_cn.txt").write_text(
+            "▽語言切換快捷鍵\nJ：日語\nE：英語\nC：繁體中文\n", encoding="cp950")
+        lib = core.Library(self.home / "library.json")
+        key = lib.add(self.game)[0]
+        self.assertTrue(lib.row(key, self.home)["no_need"])
+        self.assertFalse(lib.games[key].get("builtin_chinese"))
+        lib.redetect(key)
+        self.assertTrue(lib.row(key, self.home)["no_need"])
+        with self.assertRaises(LanguageGateStop):
+            core.extract(self.game, self.plugin, self.store)
+
+    def test_chinese_readme_and_fonts_are_not_language_options(self):
+        for text in ["這是中文安裝說明。字型：思源黑體。", "不支援語言切換快捷鍵\nC：繁體中文\n",
+                     "語言切換快捷鍵\nC：不支援中文\n"]:
+            (self.game / "readme_cn.txt").write_text(text, encoding="utf-8")
+            self.assertEqual(self.plugin.language_packs(self.game), [])
+
+    def test_language_options_in_plain_and_scrambled_configuration(self):
+        text = '.multiLangLanguageTags = [ "jp", "en", "tw" ];'
+        raw = text.encode("utf-16le")
+        packed = zlib.compress(raw)
+        variants = [text.encode(), b"\xfe\xfe\x01\xff\xfe" + b"".join(
+            struct.pack("<H", ((c & 0xaaaa) >> 1) | ((c & 0x5555) << 1))
+            for c, in struct.iter_unpack("<H", raw)),
+            b"\xfe\xfe\x02\xff\xfe" + struct.pack("<QQ", len(packed), len(raw)) + packed,
+            b"\xfe\xfe\x00\xff\xfe" + b"".join(
+                struct.pack("<H", c ^ (((c & 0xfe) << 8) ^ 1) if c >= 0x20 else c)
+                for c, in struct.iter_unpack("<H", raw))]
+        for data in variants:
+            with self.subTest(header=data[:5]):
+                (self.game / "data.xp3").write_bytes(vfs.Xp3.write({"main/default.tjs": data}))
+                packs = self.plugin.language_packs(self.game)
+                self.assertEqual([p.path for p in packs], ["data.xp3!main/default.tjs"])
+
+    def test_comments_and_replaced_configuration_do_not_mark_game(self):
+        (self.game / "data.xp3").write_bytes(vfs.Xp3.write({
+            "main/default.tjs": b'.multiLangLanguageTags = ["jp", "tw"];'}))
+        (self.game / "patch.xp3").write_bytes(vfs.Xp3.write({
+            "default.tjs": b'// .multiLangLanguageTags = ["tw"];\n'
+                           b'/* .multiLangLanguageTags = ["cn"]; */\n'
+                           b'.multiLangLanguageTags = ["jp", "en"];'}))
+        self.assertEqual(self.plugin.language_packs(self.game), [])
+
+    def test_corrupt_compressed_config_is_not_chinese_evidence(self):
+        for data in [b"\xfe\xfe\x01\xff\xfe\x00", b"\xfe\xfe\x02\xff\xfe",
+                     b"\xfe\xfe\x02\xff\xfe" + struct.pack("<QQ", 1, 2**40) + b"x"]:
+            (self.game / "data.xp3").write_bytes(vfs.Xp3.write({"main/default.tjs": data}))
+            self.assertEqual(self.plugin.language_packs(self.game), [])
+
     def test_compiled_startup_does_not_block_readable_scenarios(self):
         (self.game / "data.xp3").write_bytes(vfs.Xp3.write({
             "startup.tjs": b"TJS2100\0" + b"\0" * 32,
