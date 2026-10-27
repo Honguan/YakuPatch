@@ -24,4 +24,5 @@ yakupatch-gui = "yakupatch.gui:main"
 include = ["yakupatch*"]
 
 [tool.setuptools.package-data]
+"yakupatch" = ["sakura_start.ps1"]
 "yakupatch.gui" = ["icon.ico", "icon.png"]

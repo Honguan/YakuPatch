@@ -322,6 +322,26 @@ class Gui(unittest.TestCase):
         self.assertEqual(core.load_config(), before)
         self.assertEqual(dlg.local_model.currentText(), "other.gguf")
 
+    def test_export_sakura_kit_is_a_small_zip_without_downloads(self):
+        import zipfile
+        from PySide6.QtWidgets import QFileDialog
+        from yakupatch import sakura_kit as kit
+        from yakupatch.gui.settings import SettingsDialog
+        dest = self.home.parent / "simple kit.zip"
+        with patch.object(SettingsDialog, "_account", return_value=""):
+            dlg = SettingsDialog(self.win, 1)
+        self.idle()
+        dlg.model_table.selectRow(0)
+        with patch.object(QFileDialog, "getSaveFileName", return_value=(str(dest), "ZIP (*.zip)")), \
+                patch.object(kit, "install_llama") as install, patch.object(kit, "download_model") as download:
+            dlg.export_kit()
+            self.idle()
+            install.assert_not_called()
+            download.assert_not_called()
+        with zipfile.ZipFile(dest) as z:
+            self.assertIn("start_sakura.bat", z.namelist())
+            self.assertFalse(any(n.endswith((".exe", ".gguf")) for n in z.namelist()))
+
     def test_settings_openai_tab_saves_without_key_in_config(self):
         from yakupatch.backends import openai_compat
         from yakupatch.gui.settings import SettingsDialog

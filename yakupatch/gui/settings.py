@@ -157,7 +157,7 @@ class SettingsDialog(QDialog):
         row.addWidget(QLabel(tr("其他電腦：顯示卡記憶體")))
         row.addWidget(self.kit_vram)
         row.addWidget(self.kit_variant)
-        row.addWidget(QPushButton(tr("匯出啟動包…"), clicked=self.export_kit))
+        row.addWidget(QPushButton(tr("匯出簡易啟動包 ZIP…"), clicked=self.export_kit))
         v.addLayout(row)
         self._fill_installed(saved.get("model", ""))
         self._fill_models()
@@ -301,12 +301,22 @@ class SettingsDialog(QDialog):
         model = self._selected_model()
         if not model:
             return
-        folder = QFileDialog.getExistingDirectory(self, tr("選擇啟動包的存放資料夾（建議空資料夾）"))
-        if not folder:
+        path, _ = QFileDialog.getSaveFileName(self, tr("匯出簡易啟動包（首次啟動時下載模型）"),
+                                             f"Sakura_{Path(model.file).stem}.zip", "ZIP (*.zip)")
+        if not path:
             return
+        if not path.lower().endswith(".zip"):
+            path += ".zip"
         variant = self.kit_variant.currentData()
-        self._download(tr("匯出 Sakura 啟動包（MB）"), lambda progress, stop: sakura_kit.export_kit(
-            Path(folder), model, variant, progress=progress, stop=stop))
+
+        def done(job):
+            if job.error:
+                QMessageBox.warning(self, "YakuPatch", tr("匯出失敗：{}").format(job.error))
+            else:
+                QMessageBox.information(self, "YakuPatch", tr("已匯出：{}\n解壓縮後啟動，才會下載 llama.cpp 與模型。").format(job.result))
+
+        self.window_.run_bg(lambda job: sakura_kit.export_kit(Path(path), model, variant, stop=job.stop), done,
+                            tr("匯出 Sakura 簡易啟動包 ZIP"))
 
     # ---------- Codex ----------
     def _codex(self):

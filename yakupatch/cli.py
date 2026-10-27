@@ -87,7 +87,7 @@ def main(argv=None) -> int:
     p.add_argument("model", nargs="?", help="模型檔名（get／serve／kit）")
     p.add_argument("--variant", choices=list(sakura_kit.VARIANTS), help="llama.cpp 版本（預設依本機顯示卡）")
     p.add_argument("--vram", type=float, help="以這個顯示卡記憶體（GB）標註推薦，例如另一台電腦")
-    p.add_argument("--output", type=Path, help="啟動包資料夾（kit）")
+    p.add_argument("--output", type=Path, help="簡易啟動包 ZIP（kit；首次啟動時才下載 llama.cpp 與模型）")
     args = ap.parse_args(argv)
     translate_parser = translate_parsers[args.cmd == "batch"] if args.cmd in ("translate", "batch") else None
     if args.cmd in ("translate", "batch") and args.backend == "sakura":   # only Sakura reads config.json, so a bad file never blocks restore
@@ -211,9 +211,9 @@ def _sakura(args) -> int:
             kit.SERVER.stop()
     else:
         if not args.model or not args.output:
-            raise ValueError("kit 需要模型檔名與 --output 資料夾")
-        path = kit.export_kit(args.output, pick(args.model), variant, progress=bar)
-        print(f"\n已匯出啟動包：{path}（在另一台電腦雙擊 start_sakura.bat）")
+            raise ValueError("kit 需要模型檔名與 --output ZIP 檔案")
+        path = kit.export_kit(args.output, pick(args.model), variant)
+        print(f"\n已匯出簡易啟動包：{path}（解壓縮後雙擊 start_sakura.bat，首次啟動會下載 llama.cpp 與模型）")
     return 0
 
 
