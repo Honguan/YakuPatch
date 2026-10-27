@@ -91,9 +91,8 @@ class Gui(unittest.TestCase):
         for p in (yes, info, warn, catalogue, hardware):
             p.start()
             self.addCleanup(p.stop)
-        self.win.lib.add(self.game)
+        self.key = self.win.lib.add(self.game)[0]
         self.win.refresh_library()
-        self.key = str(self.game)
         self.win.select_game(self.key)
 
     def idle(self):
