@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QKeySequence, QShortcut
-from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QComboBox, QDialog, QFileDialog, QFormLayout, QGridLayout,
+from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QGridLayout,
                                QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem,
                                QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSizePolicy,
@@ -128,7 +128,7 @@ class MainWindow(QMainWindow):
         threading.Thread(target=run, daemon=True).start()
 
     def autostart_sakura(self):
-        """Settings → 本地 Sakura「啟動 YakuPatch 時自動開啟伺服器」; the Sakura API address was saved on first start."""
+        """Settings → 本地模型管理「啟動 YakuPatch 時自動開啟伺服器」; the Sakura API address was saved on first start."""
         try:
             cfg = core.local_config()
         except (TypeError, ValueError):
@@ -177,10 +177,11 @@ class MainWindow(QMainWindow):
         buttons = QGridLayout()
         for n, (text, slot) in enumerate((
                 (tr("移除不需翻譯"), lambda: self.remove_where(lambda r: r["no_need"], tr("不需翻譯"))),
-                (tr("移除不支援"), lambda: self.remove_where(lambda r: r["status"] == tr("不支援"), tr("不支援"))),
-                (tr("翻譯選取"), lambda: self.batch_translate(apply=False)),
-                (tr("一鍵提取→翻譯→寫回"), lambda: self.batch_translate(apply=True)))):
+                (tr("移除不支援"), lambda: self.remove_where(lambda r: r["status"] == tr("不支援"), tr("不支援"))))):
             buttons.addWidget(QPushButton(text, clicked=slot), n // 2, n % 2)
+        self.batch_apply = QCheckBox(tr("完成後寫回遊戲"))
+        buttons.addWidget(QPushButton(tr("批次翻譯選取遊戲"), clicked=self.batch_translate), 1, 0)
+        buttons.addWidget(self.batch_apply, 1, 1)
         lv.addLayout(buttons)
 
         right = QWidget()
@@ -601,9 +602,9 @@ class MainWindow(QMainWindow):
         if self.key == key:
             self._refresh_counts()
 
-    def batch_translate(self, apply=None):
-        """F16: extract → translate → optionally apply each selected game, in one queued job.
-        `apply` None asks whether to write back; the library buttons pass it."""
+    def batch_translate(self):
+        """F16: extract → translate → optionally apply each selected game, in one queued job."""
+        apply = self.batch_apply.isChecked()
         keys = [i.data(Qt.UserRole) for i in self.lib_list.selectedItems()]
         if not keys and self.lib_list.currentItem():
             keys = [self.lib_list.currentItem().data(Qt.UserRole)]
@@ -634,19 +635,9 @@ class MainWindow(QMainWindow):
             self.backend_combo.currentText(), len(keys))
         if backend.caps.metered:
             msg += "\n" + tr("這是計費後端，批次不會逐款顯示用量預估。")
-        if apply is None:
-            box = QMessageBox(QMessageBox.Question, tr("批次翻譯"), msg + "\n\n" + tr("翻譯完成後要直接寫回遊戲嗎？（原檔會先備份）"))
-            apply_btn = box.addButton(tr("翻譯並寫回"), QMessageBox.AcceptRole)
-            only_btn = box.addButton(tr("只翻譯"), QMessageBox.AcceptRole)
-            box.addButton(QMessageBox.Cancel)
-            box.exec()
-            if box.clickedButton() not in (apply_btn, only_btn):
-                return
-            apply = box.clickedButton() is apply_btn
-        else:
-            msg += "\n" + (tr("完成後直接寫回遊戲（原檔會先備份）。") if apply else tr("只翻譯，不寫回遊戲。"))
-            if QMessageBox.question(self, tr("批次翻譯"), msg + "\n\n" + tr("開始？")) != QMessageBox.Yes:
-                return
+        msg += "\n" + (tr("完成後直接寫回遊戲（原檔會先備份）。") if apply else tr("只翻譯，不寫回遊戲。"))
+        if QMessageBox.question(self, tr("批次翻譯"), msg + "\n\n" + tr("開始？")) != QMessageBox.Yes:
+            return
 
         def work(job):
             return core.batch(keys, lambda: self.make_backend(name)[0], self.home, apply=apply, progress=job.report,
@@ -782,8 +773,7 @@ class MainWindow(QMainWindow):
                              "已審閱 {}，失敗 {}，不翻 {}，不確定 {}").format(
             game, plugin.name, plugin.detect(game), len(store.manifest.get("files", {})), c["total"], c["pending"],
             c["translated"], c["reviewed"], c["failed"], c["skip"], c["uncertain"]))
-        zh = probe.get("primary", "").startswith("zh") or bool(probe.get("packs"))
-        zh = zh or row["no_need"]
+        zh = row["no_need"]
         for i in (1, 2, 3):
             self.tabs.setTabEnabled(i, not zh)
         self.preview_button.setEnabled(not zh)
@@ -1099,8 +1089,7 @@ class MainWindow(QMainWindow):
         key, (game, plugin, store) = self.key, self.current
 
         def estimate(job):
-            backend.prepare()
-            return core.estimate(store, plugin, backend, limit, only, fresh)
+            return core.estimate(store, plugin, backend, limit, only, fresh, prepare=True)
 
         def estimated(job):
             if job.error:

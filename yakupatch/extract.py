@@ -9,8 +9,8 @@ from pathlib import Path
 from . import dicts, engines, langdetect, vfs
 from .backup import Backup
 from .engines import EnginePlugin, Segment
-from .exchange import Store
-from .fsutil import atomic_write, sha256
+from .exchange import Store, read_glossary, write_glossary
+from .fsutil import sha256
 
 FORMAT = "yakupatch-strings/1"
 _PATHLIKE = re.compile(r"^[\w\-./\\]+\.(png|jpe?g|ogg|m4a|wav|json|js|txt|webm|efkefc)$", re.I)
@@ -82,7 +82,7 @@ def extract(game_dir: Path, plugin: EnginePlugin, store: Store, force: bool = Fa
         raise LanguageGateStop(lang, packs)
     files, segments = read_game(game_dir, plugin)
     lang, packs = probe(game_dir, plugin, segments)
-    if not force and (lang["primary"].startswith("zh") or packs):
+    if not force and langdetect.has_chinese(lang):
         raise LanguageGateStop(lang, packs)
     units = [u for rel in files for u in segment(rel, [s for r, s in segments if r == rel])]  # E6
     for u in units:
@@ -160,18 +160,12 @@ def _id(records: dict, kind: str, text: str) -> str:
 def seed_glossary(project: Path, records: dict[str, dict]) -> None:
     """E10: names and speakers become glossary candidates; existing rows are never overwritten.
     Local dictionaries (§6.10) add readings and existing Chinese names as unconfirmed `dict:` suggestions."""
-    path = project / "glossary.tsv"
-    rows = {}
-    if path.exists():
-        for line in path.read_text("utf-8").splitlines()[1:]:
-            cols = line.split("\t")
-            rows[cols[0]] = line
+    rows = {r[0]: r for r in read_glossary(project)}
     for rec in records.values():
         for term in (rec["src"] if rec["kind"] == "name" and rec["status"] == "pending" else None, rec["speaker"]):
-            if term and "\t" not in term and "\n" not in term and term not in rows:
-                rows[term] = "\t".join((term, *(dicts.suggest(term) or ("", "", "seed"))))
-    body = "src\tdst\tnote\tsource\n" + "".join(r + "\n" for r in rows.values())
-    atomic_write(path, body.encode("utf-8"))
+            if term and not any(c in term for c in "\t\r\n") and term not in rows:
+                rows[term] = [term, *(dicts.suggest(term) or ("", "", "seed"))]
+    write_glossary(project, list(rows.values()))
 
 
 def merge(old: dict[str, dict], new: dict[str, dict]) -> dict[str, dict]:

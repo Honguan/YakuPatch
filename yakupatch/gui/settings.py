@@ -32,8 +32,8 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self, "YakuPatch", str(ex))
             self.config = {}
         tabs = QTabWidget()
-        tabs.addTab(self._sakura(), tr("Sakura"))
-        tabs.addTab(self._local(), tr("本地 Sakura（推薦）"))
+        tabs.addTab(self._sakura(), tr("Sakura 翻譯連線"))
+        tabs.addTab(self._local(), tr("本地模型管理（推薦）"))
         tabs.addTab(self._codex(), tr("Codex（實驗性）"))
         tabs.addTab(self._openai(), tr("OpenAI 相容"))
         tabs.addTab(self._advanced(), tr("進階"))
@@ -54,8 +54,8 @@ class SettingsDialog(QDialog):
         form = QFormLayout(w)
         saved = self.config.get("sakura", {})
         self.sakura = {}
-        form.addRow(QLabel(tr("推薦在「本地 Sakura」分頁下載模型並啟動伺服器，位址會自動填好；"
-                              "只有連到自行架設或其他電腦的伺服器時才需要改這裡。"), wordWrap=True))
+        form.addRow(QLabel(tr("設定翻譯使用的伺服器與提示詞。模型下載、刪除及啟動請到「本地模型管理」。"
+                              "啟動本地伺服器後，這裡的位址與提示詞版本會自動更新。"), wordWrap=True))
         for f in fields(SakuraConfig):
             value = saved.get(f.name, f.default)
             if f.name == "version":
@@ -103,6 +103,8 @@ class SettingsDialog(QDialog):
     def _local(self):
         w = QWidget()
         v = QVBoxLayout(w)
+        v.addWidget(QLabel(tr("管理這台電腦的模型與伺服器。啟動成功後會更新「Sakura 翻譯連線」；"
+                             "連到其他電腦時，直接到該分頁設定位址。"), wordWrap=True))
         saved = self.config.get("sakura_local", {})
         self.hw = sakura_kit.hardware()
         gib = sakura_kit.GIB

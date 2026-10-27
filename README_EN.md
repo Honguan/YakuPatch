@@ -17,7 +17,7 @@
 * **Works on the game itself, no separate extraction tool**
   * 🎮 **8 engines**: detects the engine, then extracts, translates and writes back in one flow.
   * 🛡️ **Safe and reversible**: backs up before writing and restores in one click; each translation run can be undone on its own.
-  * 📚 **Batch processing**: select several games in the library and press 一鍵提取→翻譯→寫回 (extract, translate and write back) or 翻譯選取 (translate selected) to process them in turn; the translate tab shows overall, batch and per-stage (extract / translate / write back) progress bars.
+  * 📚 **Batch processing**: select several games in the library and press 批次翻譯選取遊戲 (Translate selected games) to process them in turn. Check 完成後寫回遊戲 (Apply when finished) to write the results back automatically; the translate tab shows overall, batch and per-stage (extract / translate / write back) progress bars.
   * 🗂️ **Library management**: scanned folders are remembered and can be rescanned with 重新掃描; games that need no translation or are unsupported can be removed in one click.
   * 🤝 **Share translations**: export a share file that holds only the translations (no game text); others apply it to the same game with 匯入譯文 (Import translations).
   * 🈶 **Stops on Chinese games**: skips games that are already in Chinese or ship a Chinese language pack.
@@ -29,7 +29,7 @@
   * 🔤 **No missing glyphs**: Unity, Godot and Wolf RPG games get a Chinese font automatically.
 
 * **Local or cloud**
-  * 💻 **Sakura**: a local model on your own PC; no network, no cost. Settings → 本地 Sakura (Local Sakura) downloads llama.cpp and SakuraLLM models (marking the ones that suit your GPU), starts the server, or exports a launcher kit for another PC.
+  * 💻 **Sakura**: a local model on your own PC; no network, no cost. Settings → 本地模型管理 (Local model management) downloads llama.cpp and SakuraLLM models (marking the ones that suit your GPU), starts the server, or exports a launcher kit for another PC.
   * ☁️ **Codex** (experimental): translates with the Codex quota of a ChatGPT account.
   * 🔌 **OpenAI-compatible API**: DeepSeek, OpenAI, OpenRouter, Ollama, LM Studio and others; enter the address and key.
 
@@ -79,10 +79,10 @@
   * The first start can take a few dozen seconds. The console window shows every startup step and all output, and stays open while YakuPatch runs; closing it also closes YakuPatch.
 
 * **Step 2: Set up a backend**
-  * **Local Sakura (recommended)**: open Settings → 本地 Sakura (Local Sakura), select the model marked 推薦 (Recommended) and click 下載選取的模型 (Download), then 下載最新 llama.cpp (Download llama.cpp), then 啟動伺服器 (Start server). The Sakura address fills in automatically; tick 啟動 YakuPatch 時自動開啟伺服器 (Start with YakuPatch) to skip this next time.
-  * Local Sakura and exported kits default to 8 slots, 2048 context per slot, Q8 K/V cache, batch 2048, micro-batch 512, and Flash Attention. Saved slot and context settings are preserved. If memory is insufficient, lower the slot count under 本地 Sakura; for exported kits, edit `-np` and `-c` (slots × context per slot) in the `args` array of `kit.json`. VRAM recommendations are estimates; actual usage depends on the model and hardware.
+  * **Local Sakura (recommended)**: open Settings → 本地模型管理 (Local model management), select the model marked 推薦 (Recommended) and click 下載選取的模型 (Download), then 下載最新 llama.cpp (Download llama.cpp), then 啟動伺服器 (Start server). The Sakura address fills in automatically; tick 啟動 YakuPatch 時自動開啟伺服器 (Start with YakuPatch) to skip this next time.
+  * Local Sakura and exported kits default to 8 slots, 2048 context per slot, Q8 K/V cache, batch 2048, micro-batch 512, and Flash Attention. Saved slot and context settings are preserved. If memory is insufficient, lower the slot count under 本地模型管理; for exported kits, edit `-np` and `-c` (slots × context per slot) in the `args` array of `kit.json`. VRAM recommendations are estimates; actual usage depends on the model and hardware.
   * To delete a model, stop the local server, select it under 使用的模型（已下載） (Downloaded model), click 刪除模型… (Delete model), and confirm. Deleting the saved startup model also clears that selection and disables autostart. You can download the model again later.
-  * **Run the model on another PC**: in 本地 Sakura, enter that PC's VRAM, select a model and click 匯出簡易啟動包 ZIP… (Export lightweight kit ZIP). The ZIP contains only the selected model's metadata and launcher scripts, with no llama.cpp or model binaries. Copy it to the other PC, extract it, and double-click `start_sakura.bat`. The first launch downloads and verifies the files; later launches reuse them. Python and YakuPatch are not required. On this PC, enter `http://<that PC's IP>:8080/v1` under Settings → Sakura and click 測試連線 (Test connection).
+  * **Run the model on another PC**: in 本地模型管理, enter that PC's VRAM, select a model and click 匯出簡易啟動包 ZIP… (Export lightweight kit ZIP). The ZIP contains only the selected model's metadata and launcher scripts, with no llama.cpp or model binaries. Copy it to the other PC, extract it, and double-click `start_sakura.bat`. The first launch downloads and verifies the files; later launches reuse them. Python and YakuPatch are not required. On this PC, enter `http://<that PC's IP>:8080/v1` under Settings → Sakura 翻譯連線 (Sakura connection) and click 測試連線 (Test connection).
   * **Other backends**: sign in under Settings → Codex, or enter an API address, key and model under Settings → OpenAI 相容 (OpenAI-compatible).
 
 * **Step 3: Add a game and translate**

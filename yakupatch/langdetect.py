@@ -11,6 +11,10 @@ _ZH_PARTICLES = set("吗嗎呢你妳们們这這哦吧")
 _S2T, _T2S = opencc.OpenCC("s2t"), opencc.OpenCC("t2s")
 
 
+def has_chinese(probe: dict) -> bool:
+    return probe.get("primary", "").startswith("zh") or bool(probe.get("packs"))
+
+
 @lru_cache(maxsize=None)
 def _script(c: str) -> str:
     if _S2T.convert(c) != c:
