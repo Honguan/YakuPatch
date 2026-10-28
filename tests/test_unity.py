@@ -105,6 +105,64 @@ class MonoStrings(unittest.TestCase):
 
 
 class TypeTree(unittest.TestCase):
+    def test_stripped_reference_types_preserve_metadata_and_reject_bad_payloads(self):
+        from unittest.mock import Mock
+        from UnityPy.files.SerializedFile import SerializedType
+        from UnityPy.streams import EndianBinaryWriter
+        from yakupatch.engines.unity import _type_nodes
+        def node(level, typ, name):
+            return dict(m_Level=level, m_Type=typ, m_Name=name, m_MetaFlag=0)
+        schema = _type_nodes([node(0, "MonoBehaviour", "Base"), node(1, "int", "prefix"),
+                              node(1, "ManagedReferencesRegistry", "references")])
+        generated = [node(0, "Move", "Base")] + [node(1, "int", name) for name in
+                     ("m_GameObject", "m_Enabled", "m_Script", "m_Name", "value")]
+        writer = EndianBinaryWriter(endian="<")
+        for v in (7, 2, 2):
+            writer.write_int(v)
+        for rid, value in ((123, 42), (124, -3)):
+            writer.write_long(rid)
+            for name in ("Move", "Animation", "Game"):
+                writer.write_aligned_string(name)
+            writer.write_int(value)
+        raw = writer.bytes
+        def fixture(payload):
+            ref = object.__new__(SerializedType)
+            ref.__attrs_init__(114, is_stripped_type=False, script_type_index=0,
+                               script_id=b"s" * 16, old_type_hash=b"h" * 16)
+            sf = SimpleNamespace(_enable_type_tree=False, header=SimpleNamespace(version=22), ref_types=[ref])
+            obj = SimpleNamespace(assets_file=sf, reader=SimpleNamespace(endian="<"), get_raw_data=lambda: payload)
+            ctx = _Context.__new__(_Context)
+            ctx.reference_nodes = {}
+            gen = SimpleNamespace(get_nodes_as_json=Mock(return_value=json.dumps(generated)))
+            ctx._fallback_generator = Mock(return_value=gen)
+            return ctx, obj, ref, gen
+        ctx, obj, ref, gen = fixture(raw)
+        before = EndianBinaryWriter(endian="<")
+        ref.write(obj.assets_file, before, True)
+        ctx._restore_references(obj, schema)
+        self.assertEqual((ref.m_ClassName, ref.m_NameSpace, ref.m_AssemblyName), ("Move", "Animation", "Game"))
+        self.assertEqual([n.m_Name for n in ref.node.m_Children], ["value"])
+        ctx._restore_references(obj, schema)
+        gen.get_nodes_as_json.assert_called_once_with("Game", "Animation.Move")
+        after = EndianBinaryWriter(endian="<")
+        ref.write(obj.assets_file, after, True)
+        self.assertEqual(before.bytes, after.bytes)
+        for bad in (raw[:-1], raw + b"extra", raw[:4] + struct.pack("<i", 1) + raw[8:],
+                    raw[:8] + struct.pack("<i", -1) + raw[12:]):
+            with self.subTest(payload=bad):
+                ctx, obj, ref, _ = fixture(bad)
+                with self.assertRaises((ValueError, EOFError, struct.error)):
+                    ctx._restore_references(obj, schema)
+                self.assertIsNone(ref.node)
+                self.assertIsNone(ref.m_ClassName)
+        ctx, obj, ref, gen = fixture(raw)
+        gen.get_nodes_as_json.side_effect = AssertionError("missing type")
+        for _ in range(2):
+            with self.assertRaisesRegex(ValueError, "無法重建"):
+                ctx._restore_references(obj, schema)
+        gen.get_nodes_as_json.assert_called_once()
+        self.assertIsNone(ref.node)
+
     def test_metadata_recovers_xor_only_after_validation(self):
         from yakupatch.engines.unity import _metadata
         raw = bytearray(128)

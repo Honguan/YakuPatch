@@ -129,6 +129,7 @@ class _Context:
         self.data = data
         self.il2cpp = backend == "AssetStudio"
         self.fallback_nodes = {}
+        self.reference_nodes = {}
         # IL2CPP assembly conversion still uses global native state while loading.
         with _generator_lock:
             _fallback = (None, None)
@@ -146,26 +147,85 @@ class _Context:
         else:
             gen.load_local_game(str(self.game_dir))
 
-    def _fallback_tree(self, obj, key, assembly, full):
+    def _fallback_generator(self):
+        """Caller holds _generator_lock: AssetsTools reads process-global IL2CPP metadata."""
         global _fallback
         from UnityPy.helpers.TypeTreeGenerator import TypeTreeGenerator
+        if _fallback[0] is not self:
+            _fallback = (None, None)
+            gen = TypeTreeGenerator(self.version, generator="AssetsTools")
+            self._load_generator(gen)
+            _fallback = (self, gen)
+        return _fallback[1]
+
+    def _restore_references(self, obj, nodes):
+        from UnityPy.helpers.TypeTreeHelper import TypeTreeConfig, read_value
+        from UnityPy.streams import EndianBinaryReader
+        sf = obj.assets_file
+        slots = [r for r in sf.ref_types if r.node is None and r.m_ClassName is None]
+        if sf._enable_type_tree or not slots:
+            return
+        if not nodes.m_Children or nodes.m_Children[-1].m_Type != "ManagedReferencesRegistry":
+            return
+        raw = obj.get_raw_data()
+        reader = EndianBinaryReader(raw, endian=obj.reader.endian)
+        config = TypeTreeConfig(True, sf, True)
+        for field in nodes.m_Children[:-1]:
+            read_value(field, reader, config)
+        version, count = reader.read_int(), reader.read_int()
+        if version != 2 or not 0 <= count <= (len(raw) - reader.Position) // 20:
+            raise ValueError("不支援或已損壞的 managed reference registry")
+        known = {(r.m_ClassName, r.m_NameSpace, r.m_AssemblyName): r.node for r in sf.ref_types if r.node is not None}
+        pending = {}
+        with _generator_lock:
+            for _ in range(count):
+                reader.read_long()                       # rid; references point to this ID, not a type-table index
+                key = tuple(reader.read_aligned_string() for _ in range(3))
+                cls, namespace, assembly = key
+                if not cls:
+                    raise ValueError("缺少 managed reference 類別名稱")
+                node = known.get(key) or self.reference_nodes.get(key)
+                if node is None:
+                    full = f"{namespace}.{cls}" if namespace else cls
+                    error = f"無法重建 managed reference {full}"
+                    if key in self.reference_nodes:
+                        raise ValueError(error)
+                    try:
+                        data = json.loads(_nodes_json(self._fallback_generator(), assembly.removesuffix(".dll"), full))
+                    except AssertionError as ex:
+                        self.reference_nodes[key] = None
+                        raise ValueError(error) from ex
+                    node = _type_nodes(data)
+                    if [n.m_Name for n in node.m_Children[:4]] != ["m_GameObject", "m_Enabled", "m_Script", "m_Name"]:
+                        raise ValueError(f"managed reference {full} 的型別樹標頭不正確")
+                    # Referenced classes are plain objects, without the generator's MonoBehaviour header.
+                    node.m_Children = node.m_Children[4:]
+                    self.reference_nodes[key] = node
+                read_value(node, reader, config)
+                if key not in known:
+                    pending[key] = node
+        if reader.Position != len(raw) or len(pending) > len(slots):
+            raise ValueError("managed reference 資料長度或型別數目不符")
+        # With type trees disabled these fields are runtime-only; keep table order, counts and hashes intact.
+        for ref, (key, node) in zip(slots, pending.items()):
+            ref.m_ClassName, ref.m_NameSpace, ref.m_AssemblyName = key
+            ref.node = node
+
+    def _fallback_tree(self, obj, key, assembly, full):
         empty_refs = not obj.assets_file.ref_types
         cache_key = (*key, empty_refs)
         if cache_key not in self.fallback_nodes:
             with _generator_lock:
                 try:
-                    if _fallback[0] is not self:
-                        _fallback = (None, None)
-                        gen = TypeTreeGenerator(self.version, generator="AssetsTools")
-                        self._load_generator(gen)
-                        _fallback = (self, gen)
-                    nodes = json.loads(_nodes_json(_fallback[1], assembly.removesuffix(".dll"), full))
+                    nodes = json.loads(_nodes_json(self._fallback_generator(), assembly.removesuffix(".dll"), full))
                     self.fallback_nodes[cache_key] = _type_nodes(nodes, empty_refs)
                 except (AssertionError, ValueError, OSError):
                     self.fallback_nodes[cache_key] = None
         nodes = self.fallback_nodes[cache_key]
         if nodes is None:
             raise ValueError(f"無法產生 {assembly} / {full} 的替代型別樹")
+        if not empty_refs:
+            self._restore_references(obj, nodes)
         tree = obj.read_typetree(nodes)
         if empty_refs:
             for ref in (tree.get("references") or {}).get("RefIds", []):
