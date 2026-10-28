@@ -3,3 +3,5 @@
 *.bat text eol=crlf
 *.cmd text eol=crlf
 tests/fixtures/** -text
+# Unified patches contain a required space on empty context lines.
+scripts/typetree.patch whitespace=-blank-at-eol

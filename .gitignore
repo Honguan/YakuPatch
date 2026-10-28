@@ -2,6 +2,8 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+yakupatch/native/
+tests/fixtures/typetree/obj/
 .yakupatch-tmp
 _yakupatch_backup/
 

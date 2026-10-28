@@ -29,6 +29,8 @@ _contexts: dict[str, "_Context"] = {}
 _scan_fingerprints: dict[str, str] = {}
 _generator_lock = Lock()
 _fallback = (None, None)
+_NATIVE = Path(__file__).resolve().parents[1] / "native" / "TypeTreeGeneratorAPI.dll"
+_null_reference_reader_installed = False
 _NANI = "StreamingAssets/aa/*/naninovel_assets_naninovel/scripts/*.bundle"
 _CATALOG = "StreamingAssets/aa/catalog.json"
 # Naninovel commands: field -> kind. PrintText.AuthorId is a free-form name unless it is a configured character ID.
@@ -135,6 +137,10 @@ class _Context:
         # IL2CPP assembly conversion still uses global native state while loading.
         with _generator_lock:
             _fallback = (None, None)
+            self.patched_generator = _NATIVE.is_file()
+            if self.patched_generator:
+                from TypeTreeGeneratorAPI.TypeTreeGenerator import init_dll
+                init_dll(str(_NATIVE))
             self.gen = TypeTreeGenerator(self.version, generator=backend)
             try:
                 self._load_generator(self.gen)
@@ -181,9 +187,11 @@ class _Context:
         pending = {}
         with _generator_lock:
             for _ in range(count):
-                reader.read_long()                       # rid; references point to this ID, not a type-table index
+                rid = reader.read_long()                 # references point to this ID, not a type-table index
                 key = tuple(reader.read_aligned_string() for _ in range(3))
                 cls, namespace, assembly = key
+                if rid in (-1, -2) and not any(key):
+                    continue
                 if not cls:
                     raise ValueError("缺少 managed reference 類別名稱")
                 node = known.get(key) or self.reference_nodes.get(key)
@@ -193,7 +201,8 @@ class _Context:
                     if key in self.reference_nodes:
                         raise ValueError(error)
                     try:
-                        data = json.loads(_nodes_json(self._fallback_generator(), assembly.removesuffix(".dll"), full))
+                        gen = self.gen if getattr(self, "patched_generator", False) else self._fallback_generator()
+                        data = json.loads(_nodes_json(gen, assembly.removesuffix(".dll"), full))
                     except AssertionError as ex:
                         self.reference_nodes[key] = None
                         raise ValueError(error) from ex
@@ -226,14 +235,38 @@ class _Context:
         nodes = self.fallback_nodes[cache_key]
         if nodes is None:
             raise ValueError(f"無法產生 {assembly} / {full} 的替代型別樹")
+        return self._read_tree(obj, nodes), nodes
+
+    def _read_tree(self, obj, nodes):
+        global _null_reference_reader_installed
+        if not nodes.m_Children or nodes.m_Children[-1].m_Type != "ManagedReferencesRegistry":
+            return obj.read_typetree(nodes)
+        empty_refs = not obj.assets_file.ref_types
         if not empty_refs:
             self._restore_references(obj, nodes)
         tree = obj.read_typetree(nodes)
+        nulls = [ref for ref in (tree.get("references") or {}).get("RefIds", [])
+                 if ref["rid"] in (-1, -2) and not any(ref["type"].values())]
+        if nulls and not empty_refs:
+            # UnityPy 1.25.2 omits null data while reading, but its writer requires a node and data.
+            from UnityPy.helpers import TypeTreeHelper
+            for ref in nulls:
+                ref["data"] = {}
+            with _generator_lock:
+                if not _null_reference_reader_installed:
+                    original = TypeTreeHelper.get_ref_type_node
+                    empty = _type_nodes([dict(m_Level=0, m_Type="EmptyReference", m_Name="Base", m_MetaFlag=0)])
+                    def reference_node(ref, sf):
+                        if isinstance(ref["type"], dict) and ref["rid"] in (-1, -2) and not any(ref["type"].values()):
+                            return empty
+                        return original(ref, sf)
+                    TypeTreeHelper.get_ref_type_node = reference_node
+                    _null_reference_reader_installed = True
         if empty_refs:
             for ref in (tree.get("references") or {}).get("RefIds", []):
                 if ref["rid"] not in (-1, -2) or any(ref["type"].values()):
-                    raise ValueError(f"{full} 缺少非空 managed reference 的型別資料")
-        return tree, nodes
+                    raise ValueError("缺少非空 managed reference 的型別資料")
+        return tree
 
     def script(self, obj):
         raw = obj.get_raw_data()
@@ -257,7 +290,8 @@ class _Context:
         assembly = ms.m_AssemblyName
         if not assembly.endswith(".dll"):
             assembly += ".dll"
-        key = (assembly, ms.m_Namespace, cls)
+        empty_refs = not getattr(getattr(obj, "assets_file", None), "ref_types", None)
+        key = (assembly, ms.m_Namespace, cls, empty_refs)
         full = f"{ms.m_Namespace}.{cls}" if ms.m_Namespace else cls
         error = f"無法產生 {assembly} / {full} 的型別樹（類別或依賴缺失，或格式不支援）"
         if key in self.nodes and self.nodes[key] is None:
@@ -269,9 +303,9 @@ class _Context:
                 # Thousands of objects can share one unsupported class; do not retry its native generator.
                 self.nodes[key] = None
                 raise ValueError(error) from ex
-            self.nodes[key] = _type_nodes(nodes)
+            self.nodes[key] = _type_nodes(nodes, empty_refs)
         try:
-            return cls, obj.read_typetree(self.nodes[key]), self.nodes[key]
+            return cls, self._read_tree(obj, self.nodes[key]), self.nodes[key]
         except (ValueError, EOFError, IndexError, struct.error, UnicodeDecodeError):
             if not getattr(self, "il2cpp", False):
                 raise
@@ -464,6 +498,8 @@ class Unity(EnginePlugin):
         from importlib.metadata import version
         import sys
         digest = hashlib.sha256()
+        if _NATIVE.is_file():
+            digest.update(hashlib.sha256(_NATIVE.read_bytes()).digest())
         digest.update(repr((sys.version_info[:2], version("UnityPy"), version("TypeTreeGeneratorAPI"))).encode())
         root = Path(__file__).resolve().parents[1]
         for source in sorted(root.rglob("*.py")):

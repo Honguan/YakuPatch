@@ -140,6 +140,12 @@ yakupatch-gui
 
 執行測試：`python -X utf8 -m unittest discover -s tests -t tests`。
 
+Windows 的 Unity 巢狀泛型及 managed reference 修正使用自行編譯的 TypeTreeGeneratorAPI。
+原始碼安裝需先安裝 Git、.NET 9 SDK、Visual Studio C++ 建置工具，再執行
+`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_typetree.ps1`。
+`build_win.ps1` 會自動執行此步驟，產生的免安裝 ZIP 已包含修正 DLL，不需要使用者安裝編譯工具。
+線上 PowerShell 原始碼安裝方式仍使用 PyPI 版本；需要此修正請使用重新建置的 ZIP。
+
 </details>
 
 > [!WARNING]
