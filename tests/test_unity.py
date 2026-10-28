@@ -104,6 +104,39 @@ class MonoStrings(unittest.TestCase):
 
 
 class TypeTree(unittest.TestCase):
+    def test_il2cpp_uses_instance_owned_assemblies(self):
+        import tempfile
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            game = Path(tmp)
+            env = SimpleNamespace(objects=[SimpleNamespace(assets_file=SimpleNamespace(unity_version="2021.3.21f1"))], files={})
+            with patch("UnityPy.Environment", return_value=env), patch("yakupatch.engines.unity._files", return_value=[]), \
+                    patch("UnityPy.helpers.TypeTreeGenerator.TypeTreeGenerator") as generator:
+                _Context(game)
+                generator.assert_called_with("2021.3.21f1", generator="AssetsTools")
+                (game / "GameAssembly.dll").touch()
+                _Context(game)
+                generator.assert_called_with("2021.3.21f1", generator="AssetStudio")
+
+    def test_unicode_type_name_uses_utf8_and_releases_native_memory(self):
+        import ctypes
+        from unittest.mock import Mock, patch
+        from yakupatch.engines.unity import _nodes_json
+        payload = ctypes.create_string_buffer(b'[]')
+        def generate(ptr, assembly, full, out):
+            self.assertEqual(assembly, b"Assembly-CSharp.dll")
+            self.assertEqual(full, "C_.せいせい".encode("utf-8"))
+            ctypes.cast(out, ctypes.POINTER(ctypes.c_char_p))[0] = ctypes.cast(payload, ctypes.c_char_p)
+            return status
+        dll = SimpleNamespace(TypeTreeGenerator_generateTreeNodesJson=generate, FreeCoTaskMem=Mock())
+        with patch("TypeTreeGeneratorAPI.TypeTreeGenerator.DLL", dll):
+            status = 0
+            self.assertEqual(_nodes_json(SimpleNamespace(ptr=1), "Assembly-CSharp.dll", "C_.せいせい"), "[]")
+            status = -1
+            with self.assertRaises(AssertionError):
+                _nodes_json(SimpleNamespace(ptr=1), "Assembly-CSharp.dll", "C_.せいせい")
+        self.assertEqual(dll.FreeCoTaskMem.call_count, 2)
+
     def test_generator_failure_skips_the_object(self):
         class Gen:
             calls = 0

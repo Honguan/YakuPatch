@@ -11,6 +11,7 @@ import os
 import re
 import struct
 from pathlib import Path
+from threading import Lock
 
 from .. import clr
 from ..backup import Backup
@@ -24,6 +25,7 @@ _UI = {"TextMeshProUGUI": "m_text", "TextMeshPro": "m_text", "Text": "m_Text"}
 _COLUMNS = {"Text": None, "NameText": "name", "Japanese": "ui", "Title": "ui"}
 _SKIP_SUFFIX = (".ress", ".resource", ".dll", ".json", ".txt", ".config", ".xml", ".info", ".dat", ".html")
 _contexts: dict[str, "_Context"] = {}
+_generator_lock = Lock()
 _NANI = "StreamingAssets/aa/*/naninovel_assets_naninovel/scripts/*.bundle"
 _CATALOG = "StreamingAssets/aa/catalog.json"
 # Naninovel commands: field -> kind. PrintText.AuthorId is a free-form name unless it is a configured character ID.
@@ -43,6 +45,24 @@ def _data_dir(game_dir: Path) -> Path | None:
     return next((p for p in game_dir.glob("*_Data") if p.is_dir() and (p / "globalgamemanagers").is_file()), None)
 
 
+def _nodes_json(gen, assembly: str, full: str) -> str:
+    if assembly.isascii() and full.isascii():
+        return gen.get_nodes_as_json(assembly, full)
+    # TypeTreeGeneratorAPI 0.0.10's Python wrapper uses ASCII; its native API requires UTF-8.
+    import ctypes
+    from TypeTreeGeneratorAPI.TypeTreeGenerator import DLL
+    result = ctypes.c_char_p()
+    try:
+        status = DLL.TypeTreeGenerator_generateTreeNodesJson(
+            gen.ptr, assembly.encode("utf-8"), full.encode("utf-8"), ctypes.byref(result))
+        if status != 0 or result.value is None:
+            raise AssertionError("failed to dump nodes as json")
+        return result.value.decode("utf-8")
+    finally:
+        if result.value is not None:
+            DLL.FreeCoTaskMem(result)
+
+
 class _Context:
     """Per game: MonoScripts of the main files and a TypeTree generator for builds without stored trees."""
 
@@ -58,11 +78,15 @@ class _Context:
         self.version = self.env.objects[0].assets_file.unity_version
         self.scripts = {(Path(f.name).name, o.path_id): o for f in self.env.files.values()
                         for o in getattr(f, "objects", {}).values() if o.type.name == "MonoScript"}
-        self.gen = TypeTreeGenerator(self.version)
-        try:
-            self.gen.load_local_game(str(game_dir))
-        except AssertionError:                  # e.g. "failed to load il2cpp": scripts without a stored tree are skipped
-            self.gen = None
+        # AssetsTools' IL2CPP path uses extensionless names and process-global metadata shared across games.
+        backend = "AssetStudio" if (game_dir / "GameAssembly.dll").is_file() else "AssetsTools"
+        # IL2CPP assembly conversion still uses global native state while loading.
+        with _generator_lock:
+            self.gen = TypeTreeGenerator(self.version, generator=backend)
+            try:
+                self.gen.load_local_game(str(game_dir))
+            except AssertionError:              # e.g. "failed to load il2cpp": scripts without a stored tree are skipped
+                self.gen = None
         self.nodes: dict[tuple, object | None] = {}
         self.data = data
 
@@ -96,7 +120,7 @@ class _Context:
         if key not in self.nodes:
             from UnityPy.helpers.TypeTreeNode import TypeTreeNode
             try:
-                nodes = json.loads(self.gen.get_nodes_as_json(assembly, full))
+                nodes = json.loads(_nodes_json(self.gen, assembly, full))
             except AssertionError as ex:                     # the generator asserts when it cannot build the class
                 # Thousands of objects can share one unsupported class; do not retry its native generator.
                 self.nodes[key] = None
