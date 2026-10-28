@@ -1,0 +1,117 @@
+diff --git a/TypeTreeGeneratorAPI/TypeTreeGenerator/AssetStudio/AssetStudioGenerator.cs b/TypeTreeGeneratorAPI/TypeTreeGenerator/AssetStudio/AssetStudioGenerator.cs
+index fb00e4a..e54e51a 100644
+--- a/TypeTreeGeneratorAPI/TypeTreeGenerator/AssetStudio/AssetStudioGenerator.cs
++++ b/TypeTreeGeneratorAPI/TypeTreeGenerator/AssetStudio/AssetStudioGenerator.cs
+@@ -84,6 +84,21 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio
+         {
+             var converter = new TypeDefinitionConverter(typeDef, serializedTypeHelper, 1);
+             var nodes = converter.ConvertToTypeTreeNodes();
++            if (unityVersion.Major >= 2021 && Unity.SerializationLogic.UnityEngineTypePredicates.IsUnityEngineObject(typeDef)
++                && nodes.Any(n => n.m_Type == "managedReference"))
++            {
++                nodes.Add(new TypeTreeNode("ManagedReferencesRegistry", "references", 1));
++                nodes.Add(new TypeTreeNode("int", "version", 2));
++                nodes.Add(new TypeTreeNode("vector", "RefIds", 2));
++                nodes.Add(new TypeTreeNode("Array", "Array", 3));
++                nodes.Add(new TypeTreeNode("int", "size", 4));
++                nodes.Add(new TypeTreeNode("ReferencedObject", "data", 4));
++                nodes.Add(new TypeTreeNode("SInt64", "rid", 5));
++                nodes.Add(new TypeTreeNode("ReferencedManagedType", "type", 5));
++                foreach (var name in new[] { "class", "ns", "asm" })
++                    serializedTypeHelper.AddString(nodes, name, 6);
++                nodes.Add(new TypeTreeNode("ReferencedObjectData", "data", 5));
++            }
+             nodes.Insert(0, new TypeTreeNode(typeDef.Name, "Base", 0, false));
+             return nodes;
+         }
+diff --git a/TypeTreeGeneratorAPI/TypeTreeGenerator/AssetStudio/AssetStudioUtility/TypeDefinitionConverter.cs b/TypeTreeGeneratorAPI/TypeTreeGenerator/AssetStudio/AssetStudioUtility/TypeDefinitionConverter.cs
+index 16b8b59..0ef532b 100644
+--- a/TypeTreeGeneratorAPI/TypeTreeGenerator/AssetStudio/AssetStudioUtility/TypeDefinitionConverter.cs
++++ b/TypeTreeGeneratorAPI/TypeTreeGenerator/AssetStudio/AssetStudioUtility/TypeDefinitionConverter.cs
+@@ -11,10 +11,10 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
+         private readonly SerializedTypeHelper Helper;
+         private readonly int Indent;
+ 
+-        public TypeDefinitionConverter(TypeDefinition typeDef, SerializedTypeHelper helper, int indent)
++        public TypeDefinitionConverter(TypeDefinition typeDef, SerializedTypeHelper helper, int indent, TypeResolver? resolver = null)
+         {
+             TypeDef = typeDef;
+-            TypeResolver = new TypeResolver(null);
++            TypeResolver = resolver ?? new TypeResolver(null);
+             Helper = helper;
+             Indent = indent;
+         }
+@@ -93,6 +93,7 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
+         private IEnumerable<FieldDefinition> FilteredFields()
+         {
+             return TypeDef.Fields.Where(WillUnitySerialize).Where(f =>
++                UnitySerializationLogic.HasSerializeReferenceAttribute(f) ||
+                 UnitySerializationLogic.IsSupportedCollection(f.FieldType) ||
+                 !f.FieldType.IsGenericInstance ||
+                 UnitySerializationLogic.ShouldImplementIDeserializable(f.FieldType.Resolve()));
+@@ -122,7 +123,7 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
+         private List<TypeTreeNode> ProcessingFieldRef(FieldReference fieldDef)
+         {
+             var typeRef = TypeResolver.Resolve(fieldDef.FieldType);
+-            return TypeRefToTypeTreeNodes(typeRef, fieldDef.Name, Indent, false);
++            return TypeRefToTypeTreeNodes(typeRef, fieldDef.Name, Indent, false, UnitySerializationLogic.HasSerializeReferenceAttribute(fieldDef.Resolve()));
+         }
+ 
+         private static bool IsStruct(TypeReference typeRef)
+@@ -156,7 +157,7 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
+             return typeRef.FullName == "System.String";
+         }
+ 
+-        private List<TypeTreeNode> TypeRefToTypeTreeNodes(TypeReference typeRef, string name, int indent, bool isElement)
++        private List<TypeTreeNode> TypeRefToTypeTreeNodes(TypeReference typeRef, string name, int indent, bool isElement, bool managedReference = false)
+         {
+             var align = false;
+ 
+@@ -232,19 +233,24 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
+                 var elementRef = CecilUtils.ElementTypeOfCollection(typeRef);
+                 nodes.Add(new TypeTreeNode(typeRef.Name, name, indent, align));
+                 Helper.AddArray(nodes, indent + 1);
+-                nodes.AddRange(TypeRefToTypeTreeNodes(elementRef, "data", indent + 2, true));
++                nodes.AddRange(TypeRefToTypeTreeNodes(elementRef, "data", indent + 2, true, managedReference));
+             }
+             else if (typeRef.IsArray)
+             {
+-                var elementRef = typeRef.GetElementType();
++                var elementRef = ((ArrayType)typeRef).ElementType;
+                 nodes.Add(new TypeTreeNode(typeRef.Name, name, indent, align));
+                 Helper.AddArray(nodes, indent + 1);
+-                nodes.AddRange(TypeRefToTypeTreeNodes(elementRef, "data", indent + 2, true));
++                nodes.AddRange(TypeRefToTypeTreeNodes(elementRef, "data", indent + 2, true, managedReference));
+             }
+             else if (UnityEngineTypePredicates.IsUnityEngineObject(typeRef))
+             {
+                 Helper.AddPPtr(nodes, typeRef.Name, name, indent);
+             }
++            else if (managedReference)
++            {
++                nodes.Add(new TypeTreeNode("managedReference", name, indent));
++                nodes.Add(new TypeTreeNode("SInt64", "rid", indent + 1));
++            }
+             else if (UnityEngineTypePredicates.IsSerializableUnityClass(typeRef) || UnityEngineTypePredicates.IsSerializableUnityStruct(typeRef))
+             {
+                 switch (typeRef.FullName)
+@@ -279,8 +285,17 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
+             {
+                 nodes.Add(new TypeTreeNode(typeRef.Name, name, indent, align));
+                 var typeDef = typeRef.Resolve();
+-                var typeDefinitionConverter = new TypeDefinitionConverter(typeDef, Helper, indent + 1);
+-                nodes.AddRange(typeDefinitionConverter.ConvertToTypeTreeNodes());
++                var generic = typeRef as GenericInstanceType;
++                if (generic != null) TypeResolver.Add(generic);
++                try
++                {
++                    var typeDefinitionConverter = new TypeDefinitionConverter(typeDef, Helper, indent + 1, TypeResolver);
++                    nodes.AddRange(typeDefinitionConverter.ConvertToTypeTreeNodes());
++                }
++                finally
++                {
++                    if (generic != null) TypeResolver.Remove(generic);
++                }
+             }
+ 
+             return nodes;

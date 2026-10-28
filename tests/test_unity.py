@@ -105,6 +105,48 @@ class MonoStrings(unittest.TestCase):
 
 
 class TypeTree(unittest.TestCase):
+    def test_scan_fingerprint_detects_content_and_backup_changes(self):
+        import tempfile
+        import os
+        from unittest.mock import patch
+        from yakupatch.backup import Backup
+        from yakupatch.engines.unity import Unity
+        with tempfile.TemporaryDirectory() as tmp, patch("yakupatch.engines.unity._contexts", {}), \
+                patch("yakupatch.engines.unity._scan_fingerprints", {}):
+            game = Path(tmp)
+            data = game / "Game_Data"
+            data.mkdir()
+            (data / "globalgamemanagers").write_bytes(b"assets")
+            dll = game / "GameAssembly.dll"
+            dll.write_bytes(b"one")
+            plugin = Unity()
+            first = plugin.scan_fingerprint(game)
+            self.assertEqual(plugin.scan_fingerprint(game), first)
+            stat = dll.stat()
+            dll.write_bytes(b"two")
+            os.utime(dll, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+            changed = plugin.scan_fingerprint(game)
+            self.assertNotEqual(changed, first)           # same size and timestamp still invalidates
+            from yakupatch.engines.unity import _contexts
+            _contexts[str(game.resolve())] = object()
+            self.assertEqual(plugin.scan_fingerprint(game), changed)
+            self.assertIn(str(game.resolve()), _contexts)
+            extra = data / "new.assets"
+            extra.write_bytes(b"new")
+            self.assertNotEqual(plugin.scan_fingerprint(game), changed)
+            self.assertNotIn(str(game.resolve()), _contexts)
+            extra.unlink()
+            self.assertEqual(plugin.scan_fingerprint(game), changed)
+            backup = Backup(game)
+            rel = "Game_Data/globalgamemanagers"
+            backup.ensure(rel, b"assets")
+            (game / rel).write_bytes(b"patched")
+            backup.set_patched(rel, b"patched")
+            backup.save()
+            backed = plugin.scan_fingerprint(game)
+            (backup.dir / "files" / rel).write_bytes(b"edited original")
+            self.assertNotEqual(plugin.scan_fingerprint(game), backed)
+
     def test_stripped_reference_types_preserve_metadata_and_reject_bad_payloads(self):
         from unittest.mock import Mock
         from UnityPy.files.SerializedFile import SerializedType
@@ -147,6 +189,22 @@ class TypeTree(unittest.TestCase):
         after = EndianBinaryWriter(endian="<")
         ref.write(obj.assets_file, after, True)
         self.assertEqual(before.bytes, after.bytes)
+        # A null registry entry has no payload and consumes no stripped type slot.
+        for rid in (-1, -2, 123):
+            payload = raw[:8] + struct.pack("<i", 3) + struct.pack("<qiii", rid, 0, 0, 0) + raw[12:]
+            ctx, obj, ref, gen = fixture(payload)
+            if rid in (-1, -2):
+                ctx._restore_references(obj, schema)
+                self.assertEqual(ref.m_ClassName, "Move")
+            else:
+                with self.assertRaisesRegex(ValueError, "缺少 managed reference"):
+                    ctx._restore_references(obj, schema)
+                self.assertIsNone(ref.node)
+        ctx, obj, ref, gen = fixture(raw)
+        ctx.patched_generator, ctx.gen = True, gen
+        ctx._restore_references(obj, schema)
+        ctx._fallback_generator.assert_not_called()
+        self.assertEqual(ref.m_ClassName, "Move")
         for bad in (raw[:-1], raw + b"extra", raw[:4] + struct.pack("<i", 1) + raw[8:],
                     raw[:8] + struct.pack("<i", -1) + raw[12:]):
             with self.subTest(payload=bad):
@@ -203,7 +261,7 @@ class TypeTree(unittest.TestCase):
         node(5, "ReferencedObjectData", "data")
         tree = {"references": {"version": 2, "RefIds": [
             {"rid": -2, "type": {"class": "", "ns": "", "asm": ""}, "data": {}}]}}
-        schema = _type_nodes(nodes, True)
+        schema = _type_nodes([dict(n) for n in nodes], True)
         writer = EndianBinaryWriter(endian="<")
         write_typetree(tree, schema, writer)
         raw = writer.bytes
@@ -222,6 +280,28 @@ class TypeTree(unittest.TestCase):
             tree["references"]["RefIds"][0]["type"]["class"] = "Unknown"
             with self.assertRaisesRegex(ValueError, "managed reference"):
                 ctx._fallback_tree(obj, ("A", "", "C"), "A.dll", "C")
+        # Mixed null/non-null registries must survive UnityPy's read/write asymmetry.
+        null = tree["references"]["RefIds"][0]
+        null["type"]["class"] = ""
+        null.pop("data")
+        tree["references"]["RefIds"].append(
+            {"rid": 7, "type": {"class": "Value", "ns": "Game", "asm": "Asm"}, "data": {"value": 42}})
+        value_node = _type_nodes([dict(m_Level=0, m_Type="Value", m_Name="Base", m_MetaFlag=0),
+                                  dict(m_Level=1, m_Type="int", m_Name="value", m_MetaFlag=0)])
+        sf = SimpleNamespace(_enable_type_tree=True, ref_types=[SimpleNamespace(
+            m_ClassName="Value", m_NameSpace="Game", m_AssemblyName="Asm", node=value_node)])
+        schema = _type_nodes(nodes)
+        obj.assets_file = sf
+        ctx._read_tree(obj, schema)
+        writer = EndianBinaryWriter(endian="<")
+        write_typetree(tree, schema, writer, sf)
+        expected = EndianBinaryWriter(endian="<")
+        expected.write_bytes(struct.pack("<iiqiii", 2, 2, -2, 0, 0, 0))
+        expected.write_long(7)
+        for value in ("Value", "Game", "Asm"):
+            expected.write_aligned_string(value)
+        expected.write_int(42)
+        self.assertEqual(writer.bytes, expected.bytes)
 
     def test_failed_fallback_invalidates_native_owner_and_is_not_retried(self):
         from unittest.mock import Mock, patch

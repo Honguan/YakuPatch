@@ -2,6 +2,7 @@
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build_win.ps1
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
+& (Join-Path $PSScriptRoot "build_typetree.ps1")
 $app = Join-Path $root "build\YakuPatch"
 if (Test-Path $app) { Remove-Item $app -Recurse -Force }
 $env:YAKUPATCH_DIR = $app
