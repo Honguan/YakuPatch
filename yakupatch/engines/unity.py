@@ -11,6 +11,7 @@ import os
 import re
 import struct
 from pathlib import Path
+from threading import Lock
 
 from .. import clr
 from ..backup import Backup
@@ -24,6 +25,8 @@ _UI = {"TextMeshProUGUI": "m_text", "TextMeshPro": "m_text", "Text": "m_Text"}
 _COLUMNS = {"Text": None, "NameText": "name", "Japanese": "ui", "Title": "ui"}
 _SKIP_SUFFIX = (".ress", ".resource", ".dll", ".json", ".txt", ".config", ".xml", ".info", ".dat", ".html")
 _contexts: dict[str, "_Context"] = {}
+_generator_lock = Lock()
+_fallback = (None, None)
 _NANI = "StreamingAssets/aa/*/naninovel_assets_naninovel/scripts/*.bundle"
 _CATALOG = "StreamingAssets/aa/catalog.json"
 # Naninovel commands: field -> kind. PrintText.AuthorId is a free-form name unless it is a configured character ID.
@@ -43,10 +46,72 @@ def _data_dir(game_dir: Path) -> Path | None:
     return next((p for p in game_dir.glob("*_Data") if p.is_dir() and (p / "globalgamemanagers").is_file()), None)
 
 
+def _nodes_json(gen, assembly: str, full: str) -> str:
+    if assembly.isascii() and full.isascii():
+        return gen.get_nodes_as_json(assembly, full)
+    # TypeTreeGeneratorAPI 0.0.10's Python wrapper uses ASCII; its native API requires UTF-8.
+    import ctypes
+    from TypeTreeGeneratorAPI.TypeTreeGenerator import DLL
+    result = ctypes.c_char_p()
+    try:
+        status = DLL.TypeTreeGenerator_generateTreeNodesJson(
+            gen.ptr, assembly.encode("utf-8"), full.encode("utf-8"), ctypes.byref(result))
+        if status != 0 or result.value is None:
+            raise AssertionError("failed to dump nodes as json")
+        return result.value.decode("utf-8")
+    finally:
+        if result.value is not None:
+            DLL.FreeCoTaskMem(result)
+
+
+def _metadata(raw: bytes) -> bytes:
+    """Recover short repeating-XOR metadata only when its header and string heap validate."""
+    magic = b"\xaf\x1b\xb1\xfa"
+    if raw.startswith(magic):
+        return raw
+    if len(raw) >= 32:
+        for version in range(24, 32):
+            prefix = magic + struct.pack("<I", version)
+            key_bytes = bytes(a ^ b for a, b in zip(raw, prefix))
+            for size in range(1, 9):
+                key = key_bytes[:size]
+                if any(v != key[i % size] for i, v in enumerate(key_bytes)):
+                    continue
+                header = bytes(v ^ key[i % size] for i, v in enumerate(raw[:32]))
+                literals, count, data, length, strings, size_strings = struct.unpack_from("<6I", header, 8)
+                if not (32 <= literals <= len(raw) and literals % 4 == 0 and count % 8 == 0
+                        and literals + count <= data <= data + length <= strings
+                        and 0 < size_strings <= len(raw) - strings):
+                    continue
+                heap = bytes(v ^ key[(strings + i) % size] for i, v in enumerate(raw[strings:strings + size_strings]))
+                # Obfuscated identifiers need not be valid UTF-8, but assembly names remain terminated strings.
+                if not heap.endswith(b"\0") or b".dll\0" not in heap:
+                    continue
+                return bytes(v ^ key[i % size] for i, v in enumerate(raw))
+    raise ValueError("IL2CPP metadata 格式無法識別，或 XOR 編碼內容已損壞")
+
+
+def _type_nodes(nodes: list, empty_refs: bool = False):
+    from UnityPy.helpers.TypeTreeNode import TypeTreeNode
+    for i, n in enumerate(nodes[:-3]):
+        # The generator names a list after its element type; UnityPy then reads one string.
+        if nodes[i + 1]["m_Type"] == "Array" and nodes[i + 1]["m_Level"] == n["m_Level"] + 1 \
+                and nodes[i + 3]["m_Type"] == n["m_Type"] and n["m_Type"] != "vector":
+            n["m_Type"] = "vector"
+    if empty_refs:
+        # UnityPy cannot read/write null references without ref_types; validate their headers after reading.
+        for n in nodes:
+            if n["m_Type"] in ("ReferencedObject", "ReferencedObjectData"):
+                n["m_Type"] = "Empty" + n["m_Type"]
+    return TypeTreeNode.from_list([TypeTreeNode(n["m_Level"], n["m_Type"], n["m_Name"], 0, 0,
+                                              m_MetaFlag=n["m_MetaFlag"]) for n in nodes])
+
+
 class _Context:
     """Per game: MonoScripts of the main files and a TypeTree generator for builds without stored trees."""
 
     def __init__(self, game_dir: Path):
+        global _fallback
         import UnityPy
         from UnityPy.helpers.TypeTreeGenerator import TypeTreeGenerator
         data = _data_dir(game_dir)
@@ -58,13 +123,55 @@ class _Context:
         self.version = self.env.objects[0].assets_file.unity_version
         self.scripts = {(Path(f.name).name, o.path_id): o for f in self.env.files.values()
                         for o in getattr(f, "objects", {}).values() if o.type.name == "MonoScript"}
-        self.gen = TypeTreeGenerator(self.version)
-        try:
-            self.gen.load_local_game(str(game_dir))
-        except AssertionError:                  # e.g. "failed to load il2cpp": scripts without a stored tree are skipped
-            self.gen = None
-        self.nodes: dict[tuple, object] = {}
+        # AssetsTools' IL2CPP path uses extensionless names and process-global metadata shared across games.
+        backend = "AssetStudio" if (game_dir / "GameAssembly.dll").is_file() else "AssetsTools"
+        self.game_dir = game_dir
         self.data = data
+        self.il2cpp = backend == "AssetStudio"
+        self.fallback_nodes = {}
+        # IL2CPP assembly conversion still uses global native state while loading.
+        with _generator_lock:
+            _fallback = (None, None)
+            self.gen = TypeTreeGenerator(self.version, generator=backend)
+            try:
+                self._load_generator(self.gen)
+            except (AssertionError, ValueError, OSError):  # stored trees and TextAssets remain usable
+                self.gen = None
+        self.nodes: dict[tuple, object | None] = {}
+
+    def _load_generator(self, gen):
+        if self.il2cpp:
+            gen.load_il2cpp((self.game_dir / "GameAssembly.dll").read_bytes(),
+                           _metadata((self.data / "il2cpp_data/Metadata/global-metadata.dat").read_bytes()))
+        else:
+            gen.load_local_game(str(self.game_dir))
+
+    def _fallback_tree(self, obj, key, assembly, full):
+        global _fallback
+        from UnityPy.helpers.TypeTreeGenerator import TypeTreeGenerator
+        empty_refs = not obj.assets_file.ref_types
+        cache_key = (*key, empty_refs)
+        if cache_key not in self.fallback_nodes:
+            with _generator_lock:
+                try:
+                    if _fallback[0] is not self:
+                        _fallback = (None, None)
+                        gen = TypeTreeGenerator(self.version, generator="AssetsTools")
+                        self._load_generator(gen)
+                        _fallback = (self, gen)
+                    nodes = json.loads(_nodes_json(_fallback[1], assembly.removesuffix(".dll"), full))
+                    self.fallback_nodes[cache_key] = _type_nodes(nodes, empty_refs)
+                except (AssertionError, ValueError, OSError):
+                    self.fallback_nodes[cache_key] = None
+        nodes = self.fallback_nodes[cache_key]
+        if nodes is None:
+            raise ValueError(f"無法產生 {assembly} / {full} 的替代型別樹")
+        tree = obj.read_typetree(nodes)
+        if empty_refs:
+            for ref in (tree.get("references") or {}).get("RefIds", []):
+                if ref["rid"] not in (-1, -2) or any(ref["type"].values()):
+                    raise ValueError(f"{full} 缺少非空 managed reference 的型別資料")
+        return tree, nodes
 
     def script(self, obj):
         raw = obj.get_raw_data()
@@ -85,22 +192,29 @@ class _Context:
             raise ValueError("找不到 MonoScript")
         if self.gen is None:
             raise ValueError("無法載入遊戲的程式碼（IL2CPP），無法讀取此腳本")
-        key = (ms.m_AssemblyName, ms.m_Namespace, cls)
+        assembly = ms.m_AssemblyName
+        if not assembly.endswith(".dll"):
+            assembly += ".dll"
+        key = (assembly, ms.m_Namespace, cls)
+        full = f"{ms.m_Namespace}.{cls}" if ms.m_Namespace else cls
+        error = f"無法產生 {assembly} / {full} 的型別樹（類別或依賴缺失，或格式不支援）"
+        if key in self.nodes and self.nodes[key] is None:
+            raise ValueError(error)
         if key not in self.nodes:
-            from UnityPy.helpers.TypeTreeNode import TypeTreeNode
-            full = f"{ms.m_Namespace}.{cls}" if ms.m_Namespace else cls
             try:
-                nodes = json.loads(self.gen.get_nodes_as_json(ms.m_AssemblyName, full))
+                nodes = json.loads(_nodes_json(self.gen, assembly, full))
             except AssertionError as ex:                     # the generator asserts when it cannot build the class
-                raise ValueError(f"無法產生 {full} 的型別樹") from ex
-            for i, n in enumerate(nodes[:-3]):
-                # The generator names a list field after its element type; UnityPy then reads one string.
-                if nodes[i + 1]["m_Type"] == "Array" and nodes[i + 1]["m_Level"] == n["m_Level"] + 1 \
-                        and nodes[i + 3]["m_Type"] == n["m_Type"] and n["m_Type"] != "vector":
-                    n["m_Type"] = "vector"
-            self.nodes[key] = TypeTreeNode.from_list([TypeTreeNode(n["m_Level"], n["m_Type"], n["m_Name"], 0, 0,
-                                                                   m_MetaFlag=n["m_MetaFlag"]) for n in nodes])
-        return cls, obj.read_typetree(self.nodes[key]), self.nodes[key]
+                # Thousands of objects can share one unsupported class; do not retry its native generator.
+                self.nodes[key] = None
+                raise ValueError(error) from ex
+            self.nodes[key] = _type_nodes(nodes)
+        try:
+            return cls, obj.read_typetree(self.nodes[key]), self.nodes[key]
+        except (ValueError, EOFError, IndexError, struct.error, UnicodeDecodeError):
+            if not getattr(self, "il2cpp", False):
+                raise
+            tree, nodes = self._fallback_tree(obj, key, assembly, full)
+            return cls, tree, nodes
 
 
 def _context(game_dir: Path) -> _Context:

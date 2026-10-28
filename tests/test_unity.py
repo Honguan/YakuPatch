@@ -2,6 +2,7 @@ import unittest
 
 import base64
 import json
+import struct
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -104,19 +105,155 @@ class MonoStrings(unittest.TestCase):
 
 
 class TypeTree(unittest.TestCase):
+    def test_metadata_recovers_xor_only_after_validation(self):
+        from yakupatch.engines.unity import _metadata
+        raw = bytearray(128)
+        struct.pack_into("<8I", raw, 0, 0xFAB11BAF, 29, 32, 8, 40, 56, 96, 8)
+        raw[96:104] = b"A.dll\0x\0"
+        raw[102] = 0x80                           # obfuscated identifiers may contain non-UTF-8 bytes
+        plain = bytes(raw)
+        self.assertIs(_metadata(plain), plain)
+        for key in (b"x", b"wanzg", b"12345678"):
+            encoded = bytes(v ^ key[i % len(key)] for i, v in enumerate(plain))
+            self.assertEqual(_metadata(encoded), plain)
+        for invalid in (b"", b"bad header", bytes(128), encoded[:100]):
+            with self.assertRaises(ValueError):
+                _metadata(invalid)
+
+    def test_empty_reference_roundtrip_and_nonempty_rejection(self):
+        from unittest.mock import Mock, patch
+        from UnityPy.helpers.TypeTreeHelper import read_typetree, write_typetree
+        from UnityPy.streams import EndianBinaryReader, EndianBinaryWriter
+        from yakupatch.engines.unity import _type_nodes
+        nodes = []
+        def node(level, typ, name, flag=0):
+            nodes.append(dict(m_Level=level, m_Type=typ, m_Name=name, m_MetaFlag=flag))
+        node(0, "MonoBehaviour", "Base")
+        node(1, "ManagedReferencesRegistry", "references")
+        node(2, "int", "version")
+        node(2, "vector", "RefIds")
+        node(3, "Array", "Array")
+        node(4, "int", "size")
+        node(4, "ReferencedObject", "data")
+        node(5, "SInt64", "rid")
+        node(5, "ReferencedManagedType", "type")
+        for field in ("class", "ns", "asm"):
+            node(6, "string", field, 16384)
+            node(7, "Array", "Array")
+            node(8, "int", "size")
+            node(8, "char", "data")
+        node(5, "ReferencedObjectData", "data")
+        tree = {"references": {"version": 2, "RefIds": [
+            {"rid": -2, "type": {"class": "", "ns": "", "asm": ""}, "data": {}}]}}
+        schema = _type_nodes(nodes, True)
+        writer = EndianBinaryWriter(endian="<")
+        write_typetree(tree, schema, writer)
+        raw = writer.bytes
+        self.assertEqual(read_typetree(schema, EndianBinaryReader(raw, endian="<"), byte_size=len(raw)), tree)
+        ctx = _Context.__new__(_Context)
+        ctx.version, ctx.fallback_nodes = "2021.3.21f1", {}
+        ctx._load_generator = Mock()
+        obj = SimpleNamespace(assets_file=SimpleNamespace(ref_types=[]), read_typetree=lambda n: tree)
+        with patch("yakupatch.engines.unity._fallback", (None, None)), \
+                patch("UnityPy.helpers.TypeTreeGenerator.TypeTreeGenerator") as factory:
+            factory.return_value.get_nodes_as_json.return_value = json.dumps(nodes)
+            for _ in range(2):
+                self.assertEqual(ctx._fallback_tree(obj, ("A", "", "C"), "A.dll", "C")[0], tree)
+            factory.return_value.get_nodes_as_json.assert_called_once_with("A", "C")
+            ctx._load_generator.assert_called_once()
+            tree["references"]["RefIds"][0]["type"]["class"] = "Unknown"
+            with self.assertRaisesRegex(ValueError, "managed reference"):
+                ctx._fallback_tree(obj, ("A", "", "C"), "A.dll", "C")
+
+    def test_failed_fallback_invalidates_native_owner_and_is_not_retried(self):
+        from unittest.mock import Mock, patch
+        import yakupatch.engines.unity as unity
+        ctx = _Context.__new__(_Context)
+        ctx.version, ctx.fallback_nodes = "2021.3.21f1", {}
+        ctx._load_generator = Mock(side_effect=AssertionError("bad metadata"))
+        obj = SimpleNamespace(assets_file=SimpleNamespace(ref_types=[]))
+        with patch.object(unity, "_fallback", (object(), object())), \
+                patch("UnityPy.helpers.TypeTreeGenerator.TypeTreeGenerator"):
+            for _ in range(2):
+                with self.assertRaises(ValueError):
+                    ctx._fallback_tree(obj, ("A", "", "C"), "A.dll", "C")
+            ctx._load_generator.assert_called_once()
+            self.assertEqual(unity._fallback, (None, None))
+
+    def test_il2cpp_uses_instance_owned_assemblies(self):
+        import tempfile
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            game = Path(tmp)
+            env = SimpleNamespace(objects=[SimpleNamespace(assets_file=SimpleNamespace(unity_version="2021.3.21f1"))], files={})
+            with patch("UnityPy.Environment", return_value=env), patch("yakupatch.engines.unity._files", return_value=[]), \
+                    patch.object(_Context, "_load_generator"), \
+                    patch("UnityPy.helpers.TypeTreeGenerator.TypeTreeGenerator") as generator:
+                _Context(game)
+                generator.assert_called_with("2021.3.21f1", generator="AssetsTools")
+                (game / "GameAssembly.dll").touch()
+                _Context(game)
+                generator.assert_called_with("2021.3.21f1", generator="AssetStudio")
+
+    def test_unicode_type_name_uses_utf8_and_releases_native_memory(self):
+        import ctypes
+        from unittest.mock import Mock, patch
+        from yakupatch.engines.unity import _nodes_json
+        payload = ctypes.create_string_buffer(b'[]')
+        def generate(ptr, assembly, full, out):
+            self.assertEqual(assembly, b"Assembly-CSharp.dll")
+            self.assertEqual(full, "C_.せいせい".encode("utf-8"))
+            ctypes.cast(out, ctypes.POINTER(ctypes.c_char_p))[0] = ctypes.cast(payload, ctypes.c_char_p)
+            return status
+        dll = SimpleNamespace(TypeTreeGenerator_generateTreeNodesJson=generate, FreeCoTaskMem=Mock())
+        with patch("TypeTreeGeneratorAPI.TypeTreeGenerator.DLL", dll):
+            status = 0
+            self.assertEqual(_nodes_json(SimpleNamespace(ptr=1), "Assembly-CSharp.dll", "C_.せいせい"), "[]")
+            status = -1
+            with self.assertRaises(AssertionError):
+                _nodes_json(SimpleNamespace(ptr=1), "Assembly-CSharp.dll", "C_.せいせい")
+        self.assertEqual(dll.FreeCoTaskMem.call_count, 2)
+
     def test_generator_failure_skips_the_object(self):
         class Gen:
+            calls = 0
             def get_nodes_as_json(self, asm, cls):
+                self.calls += 1
                 raise AssertionError("failed to dump nodes as json")
         ctx = _Context.__new__(_Context)
         ctx.gen, ctx.nodes = Gen(), {}
         ms = SimpleNamespace(m_ClassName="Talk", m_AssemblyName="Assembly-CSharp.dll", m_Namespace="")
         ctx.script = lambda obj: ms
-        with self.assertRaises(ValueError):                  # callers skip an object on ValueError
-            ctx.tree(SimpleNamespace(serialized_type=None))
+        for _ in range(20):
+            with self.assertRaises(ValueError):              # callers skip an object on ValueError
+                ctx.tree(SimpleNamespace(serialized_type=None))
+        self.assertEqual(ctx.gen.calls, 1)
+        stored = {"m_Text": "既有型別樹"}
+        obj = SimpleNamespace(serialized_type=SimpleNamespace(node=object()), read_typetree=lambda: stored)
+        self.assertEqual(ctx.tree(obj), ("Talk", stored, None))
         ctx.gen = None                                       # the game's IL2CPP code could not be loaded
         with self.assertRaises(ValueError):
             ctx.tree(SimpleNamespace(serialized_type=None))
+
+    def test_normalizes_assembly_and_keeps_other_classes_readable(self):
+        from unittest.mock import Mock
+        ctx = _Context.__new__(_Context)
+        ctx.nodes = {}
+        nodes = [{"m_Level": 0, "m_Type": "MonoBehaviour", "m_Name": "Base", "m_MetaFlag": 0}]
+        ctx.gen = SimpleNamespace(get_nodes_as_json=Mock(side_effect=[AssertionError("missing"), json.dumps(nodes)]))
+        ms = SimpleNamespace(m_ClassName="Missing", m_AssemblyName="Assembly-CSharp", m_Namespace="Game")
+        ctx.script = lambda obj: ms
+        obj = SimpleNamespace(serialized_type=None, read_typetree=lambda nodes: {"text": "hello"})
+        with self.assertRaises(ValueError):
+            ctx.tree(obj)
+        ms.m_AssemblyName = "Assembly-CSharp.dll"
+        with self.assertRaises(ValueError):
+            ctx.tree(obj)
+        ms.m_ClassName = "Talk"
+        self.assertEqual(ctx.tree(obj)[1], {"text": "hello"})
+        self.assertEqual(ctx.tree(obj)[1], {"text": "hello"})
+        self.assertEqual(ctx.gen.get_nodes_as_json.call_count, 2)
+        self.assertEqual(ctx.gen.get_nodes_as_json.call_args_list[0].args, ("Assembly-CSharp.dll", "Game.Missing"))
 
 
 if __name__ == "__main__":
