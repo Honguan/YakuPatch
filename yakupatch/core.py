@@ -407,13 +407,25 @@ class Library:
                 break
             if progress:
                 progress({"stage": "掃描", "index": i, "of": len(roots), "game": str(game)})
-            self.games.setdefault(str(game), {"engine": plugin.name}).update(_detect(game, plugin))
+            entry = self.games.setdefault(str(game), {"engine": plugin.name})
+            try:
+                fingerprint = plugin.scan_fingerprint(game)
+            except Exception:                    # cache validation must not prevent normal error reporting
+                fingerprint = None
+            if not fingerprint or entry.get("scan_fingerprint") != fingerprint or entry.get("unsupported") \
+                    or entry.get("engine") != plugin.name:
+                entry.update({"engine": plugin.name, **_detect(game, plugin), "scan_fingerprint": fingerprint})
             added.append(str(game))
         self._save()
         return added
 
     def redetect(self, key: str) -> None:
         game, plugin, _ = open_game(Path(key))
+        self.games[key].pop("scan_fingerprint", None)
+        try:
+            plugin.scan_fingerprint(game)        # also invalidates an in-memory Unity context after file changes
+        except Exception:
+            pass
         self.games[key].update({"engine": plugin.name, **_detect(game, plugin)})
         self._save()
 

@@ -105,6 +105,48 @@ class MonoStrings(unittest.TestCase):
 
 
 class TypeTree(unittest.TestCase):
+    def test_scan_fingerprint_detects_content_and_backup_changes(self):
+        import tempfile
+        import os
+        from unittest.mock import patch
+        from yakupatch.backup import Backup
+        from yakupatch.engines.unity import Unity
+        with tempfile.TemporaryDirectory() as tmp, patch("yakupatch.engines.unity._contexts", {}), \
+                patch("yakupatch.engines.unity._scan_fingerprints", {}):
+            game = Path(tmp)
+            data = game / "Game_Data"
+            data.mkdir()
+            (data / "globalgamemanagers").write_bytes(b"assets")
+            dll = game / "GameAssembly.dll"
+            dll.write_bytes(b"one")
+            plugin = Unity()
+            first = plugin.scan_fingerprint(game)
+            self.assertEqual(plugin.scan_fingerprint(game), first)
+            stat = dll.stat()
+            dll.write_bytes(b"two")
+            os.utime(dll, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+            changed = plugin.scan_fingerprint(game)
+            self.assertNotEqual(changed, first)           # same size and timestamp still invalidates
+            from yakupatch.engines.unity import _contexts
+            _contexts[str(game.resolve())] = object()
+            self.assertEqual(plugin.scan_fingerprint(game), changed)
+            self.assertIn(str(game.resolve()), _contexts)
+            extra = data / "new.assets"
+            extra.write_bytes(b"new")
+            self.assertNotEqual(plugin.scan_fingerprint(game), changed)
+            self.assertNotIn(str(game.resolve()), _contexts)
+            extra.unlink()
+            self.assertEqual(plugin.scan_fingerprint(game), changed)
+            backup = Backup(game)
+            rel = "Game_Data/globalgamemanagers"
+            backup.ensure(rel, b"assets")
+            (game / rel).write_bytes(b"patched")
+            backup.set_patched(rel, b"patched")
+            backup.save()
+            backed = plugin.scan_fingerprint(game)
+            (backup.dir / "files" / rel).write_bytes(b"edited original")
+            self.assertNotEqual(plugin.scan_fingerprint(game), backed)
+
     def test_stripped_reference_types_preserve_metadata_and_reject_bad_payloads(self):
         from unittest.mock import Mock
         from UnityPy.files.SerializedFile import SerializedType

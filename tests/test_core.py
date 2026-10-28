@@ -145,6 +145,28 @@ class CoreApi(unittest.TestCase):
         with self.assertRaises(ValueError):
             lib.add(parent / "missing-game")
 
+    def test_library_reuses_only_matching_successful_probes(self):
+        lib = core.Library()
+        roots = [(self.game, self.plugin)]
+        result = {"lang": "ja", "probe": {"primary": "ja"}, "unsupported": ""}
+        with patch.object(self.plugin, "scan_fingerprint", return_value="original") as fingerprint, \
+                patch.object(core, "_detect", return_value=result) as detect:
+            first = lib._add(roots)
+            lib.set_builtin_chinese(str(self.game), True)
+            lib = core.Library()                         # survives an application restart
+            self.assertEqual(lib._add(roots), first)
+            detect.assert_called_once()
+            self.assertTrue(lib.games[str(self.game)]["builtin_chinese"])
+            fingerprint.return_value = "updated"
+            lib._add(roots)
+            self.assertEqual(detect.call_count, 2)
+            lib.games[str(self.game)]["unsupported"] = "temporary read error"
+            lib._add(roots)
+            self.assertEqual(detect.call_count, 3)
+            fingerprint.side_effect = OSError("unreadable input")
+            lib._add(roots)
+            self.assertEqual(detect.call_count, 4)
+
     def test_library_remembers_folders_and_survives_a_bad_game(self):
         lib = core.Library()
         parent = Path(tempfile.mkdtemp(prefix="yakupatch-lib-")).resolve()

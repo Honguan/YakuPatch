@@ -10,6 +10,7 @@ import json
 import os
 import re
 import struct
+import hashlib
 from pathlib import Path
 from threading import Lock
 
@@ -25,6 +26,7 @@ _UI = {"TextMeshProUGUI": "m_text", "TextMeshPro": "m_text", "Text": "m_Text"}
 _COLUMNS = {"Text": None, "NameText": "name", "Japanese": "ui", "Title": "ui"}
 _SKIP_SUFFIX = (".ress", ".resource", ".dll", ".json", ".txt", ".config", ".xml", ".info", ".dat", ".html")
 _contexts: dict[str, "_Context"] = {}
+_scan_fingerprints: dict[str, str] = {}
 _generator_lock = Lock()
 _fallback = (None, None)
 _NANI = "StreamingAssets/aa/*/naninovel_assets_naninovel/scripts/*.bundle"
@@ -457,6 +459,34 @@ class Unity(EnginePlugin):
 
     def detect(self, game_dir: Path) -> float:
         return 1.0 if _data_dir(game_dir) is not None and (game_dir / "UnityPlayer.dll").is_file() else 0.0
+
+    def scan_fingerprint(self, game_dir: Path) -> str:
+        from importlib.metadata import version
+        import sys
+        digest = hashlib.sha256()
+        digest.update(repr((sys.version_info[:2], version("UnityPy"), version("TypeTreeGeneratorAPI"))).encode())
+        root = Path(__file__).resolve().parents[1]
+        for source in sorted(root.rglob("*.py")):
+            digest.update(source.relative_to(root).as_posix().encode() + b"\0")
+            digest.update(hashlib.sha256(source.read_bytes().replace(b"\r\n", b"\n")).digest())
+        data = _data_dir(game_dir)
+        paths = set(_files(game_dir) + _bundles(game_dir) + list((data / "Managed").glob("*.dll")))
+        paths.update(p for p in (game_dir / "GameAssembly.dll", data / "il2cpp_data/Metadata/global-metadata.dat")
+                     if p.is_file())
+        backup = Backup(game_dir)
+        for path in sorted(paths):
+            rel = path.relative_to(game_dir).as_posix()
+            digest.update(rel.encode() + b"\0")
+            with path.open("rb") as stream:
+                digest.update(hashlib.file_digest(stream, "sha256").digest())
+            if rel in backup.files:
+                digest.update(hashlib.sha256(backup.original_bytes(rel)).digest())
+        fingerprint = digest.hexdigest()
+        key = str(game_dir.resolve())
+        if _scan_fingerprints.get(key) != fingerprint:
+            _contexts.pop(key, None)               # metadata and MonoScripts must also refresh after a game update
+            _scan_fingerprints[key] = fingerprint
+        return fingerprint
 
     def locate(self, game_dir: Path) -> list[str]:
         ctx = _context(game_dir)

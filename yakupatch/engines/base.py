@@ -33,6 +33,10 @@ class EnginePlugin:
     def language_packs(self, game_dir: Path) -> list[LangPack]:
         return []
 
+    def scan_fingerprint(self, game_dir: Path) -> str | None:
+        """Exact scan inputs, or None when this engine does not support reusing library probes."""
+        return None
+
     # Relative paths; a member of a container is "<container>!<inner>" (see vfs.py).
     def locate(self, game_dir: Path) -> list[str]:
         raise NotImplementedError
