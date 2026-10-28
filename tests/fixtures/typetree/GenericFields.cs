@@ -6,6 +6,7 @@ namespace UnityEngine
     public class Object { }
     public class MonoBehaviour : Object { }
     public class SerializeReference : Attribute { }
+    [Serializable] public struct LazyLoadReference<T> where T : Object { }
 }
 
 namespace Fixture
@@ -23,6 +24,7 @@ namespace Fixture
     [Serializable] public class Inner : Box<int> { }
     public class Rebound : Box<Inner> { }
     public class DirectBox : UnityEngine.MonoBehaviour { public Box<Box<int>> nested; }
+    public class LazyAsset : UnityEngine.MonoBehaviour { public UnityEngine.LazyLoadReference<UnityEngine.Object> asset; }
     [Serializable] public class Values
     {
         [UnityEngine.SerializeReference] public List<IValue> items;

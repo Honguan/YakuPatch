@@ -25,7 +25,7 @@ index fb00e4a..e54e51a 100644
              return nodes;
          }
 diff --git a/TypeTreeGeneratorAPI/TypeTreeGenerator/AssetStudio/AssetStudioUtility/TypeDefinitionConverter.cs b/TypeTreeGeneratorAPI/TypeTreeGenerator/AssetStudio/AssetStudioUtility/TypeDefinitionConverter.cs
-index 16b8b59..c61da94 100644
+index 16b8b59..4744e9b 100644
 --- a/TypeTreeGeneratorAPI/TypeTreeGenerator/AssetStudio/AssetStudioUtility/TypeDefinitionConverter.cs
 +++ b/TypeTreeGeneratorAPI/TypeTreeGenerator/AssetStudio/AssetStudioUtility/TypeDefinitionConverter.cs
 @@ -11,10 +11,10 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
@@ -83,7 +83,7 @@ index 16b8b59..c61da94 100644
          {
              var align = false;
  
-@@ -232,19 +224,24 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
+@@ -232,19 +224,28 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
                  var elementRef = CecilUtils.ElementTypeOfCollection(typeRef);
                  nodes.Add(new TypeTreeNode(typeRef.Name, name, indent, align));
                  Helper.AddArray(nodes, indent + 1);
@@ -103,6 +103,10 @@ index 16b8b59..c61da94 100644
              {
                  Helper.AddPPtr(nodes, typeRef.Name, name, indent);
              }
++            else if (typeRef is GenericInstanceType lazy && lazy.ElementType.FullName == "UnityEngine.LazyLoadReference`1")
++            {
++                Helper.AddPPtr(nodes, lazy.GenericArguments[0].Name, name, indent);
++            }
 +            else if (managedReference)
 +            {
 +                nodes.Add(new TypeTreeNode("managedReference", name, indent));
@@ -111,7 +115,7 @@ index 16b8b59..c61da94 100644
              else if (UnityEngineTypePredicates.IsSerializableUnityClass(typeRef) || UnityEngineTypePredicates.IsSerializableUnityStruct(typeRef))
              {
                  switch (typeRef.FullName)
-@@ -279,8 +276,17 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
+@@ -279,8 +280,17 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
              {
                  nodes.Add(new TypeTreeNode(typeRef.Name, name, indent, align));
                  var typeDef = typeRef.Resolve();

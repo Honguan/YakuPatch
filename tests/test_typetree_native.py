@@ -50,3 +50,6 @@ class NativeTypeTrees(unittest.TestCase):
         self.assertEqual(sum(n["m_Type"] == "SInt32" for n in nodes), 4)
         nodes = json.loads(_nodes_json(gen, "GenericFields.dll", "Fixture.DirectBox"))
         self.assertEqual(sum(n["m_Type"] == "SInt32" for n in nodes), 4)
+        nodes = json.loads(_nodes_json(gen, "GenericFields.dll", "Fixture.LazyAsset"))
+        self.assertEqual([(n["m_Type"], n["m_Name"]) for n in nodes[-3:]],
+                         [("PPtr<Object>", "asset"), ("int", "m_FileID"), ("SInt64", "m_PathID")])
