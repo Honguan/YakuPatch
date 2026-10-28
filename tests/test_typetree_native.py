@@ -53,3 +53,25 @@ class NativeTypeTrees(unittest.TestCase):
         nodes = json.loads(_nodes_json(gen, "GenericFields.dll", "Fixture.LazyAsset"))
         self.assertEqual([(n["m_Type"], n["m_Name"]) for n in nodes[-3:]],
                          [("PPtr<Object>", "asset"), ("int", "m_FileID"), ("SInt64", "m_PathID")])
+        nodes = json.loads(_nodes_json(gen, "GenericFields.dll", "Fixture.SelfHost"))
+        self.assertEqual([n["m_Name"] for n in nodes if n["m_Type"] == "managedReference"], ["parent"])
+        self.assertFalse(any(n["m_Name"] == "inline" for n in nodes))
+        nodes = json.loads(_nodes_json(gen, "GenericFields.dll", "Fixture.ReferencedValue"))
+        self.assertEqual([n["m_Name"] for n in nodes if n["m_Type"] == "float"], ["r", "g", "b", "a"])
+        self.assertFalse(any(n["m_Type"] in ("managedReference", "ManagedReferencesRegistry") for n in nodes))
+        nodes = json.loads(_nodes_json(gen, "GenericFields.dll", "Fixture.BoxedEnum"))
+        self.assertEqual([n["m_Name"] for n in nodes if n["m_Type"] == "managedReference"], ["value"])
+
+    def test_abstract_inline_fields_are_not_serialized(self):
+        from TypeTreeGeneratorAPI.TypeTreeGenerator import init_dll
+        from UnityPy.helpers.TypeTreeGenerator import TypeTreeGenerator
+        init_dll(str(_NATIVE))
+        gen = TypeTreeGenerator("2021.3.22f1", generator="AssetStudio")
+        for assembly in sorted(FIXTURE.parent.glob("*.dll")):
+            gen.load_dll(assembly.read_bytes())
+        nodes = json.loads(_nodes_json(gen, "GenericFields.dll", "Fixture.AbstractFields"))
+        names = {n["m_Name"] for n in nodes}
+        self.assertFalse(names & {"inline", "list", "array"})
+        self.assertTrue({"reference", "references", "concrete", "number", "text", "asset"} <= names)
+        self.assertEqual(sum(n["m_Type"] == "managedReference" for n in nodes), 2)
+        self.assertEqual([n["m_Type"] for n in nodes if n["m_Name"] == "asset"], ["PPtr<AbstractAsset>"])
