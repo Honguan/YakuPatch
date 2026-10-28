@@ -134,6 +134,7 @@ class _Context:
         self.il2cpp = backend == "AssetStudio"
         self.fallback_nodes = {}
         self.reference_nodes = {}
+        self.assemblies = None
         # IL2CPP assembly conversion still uses global native state while loading.
         with _generator_lock:
             _fallback = (None, None)
@@ -144,6 +145,8 @@ class _Context:
             self.gen = TypeTreeGenerator(self.version, generator=backend)
             try:
                 self._load_generator(self.gen)
+                self.assemblies = {name if name.endswith(".dll") else name + ".dll"
+                                   for name in self.gen.get_loaded_dll_names()}
             except (AssertionError, ValueError, OSError):  # stored trees and TextAssets remain usable
                 self.gen = None
         self.nodes: dict[tuple, object | None] = {}
@@ -288,8 +291,12 @@ class _Context:
         if self.gen is None:
             raise ValueError("無法載入遊戲的程式碼（IL2CPP），無法讀取此腳本")
         assembly = ms.m_AssemblyName
+        if not assembly or not cls:
+            raise ValueError("MonoScript 的組件名稱或類別名稱為空")
         if not assembly.endswith(".dll"):
             assembly += ".dll"
+        if getattr(self, "assemblies", None) is not None and assembly not in self.assemblies:
+            raise ValueError(f"遊戲未包含腳本組件 {assembly}（{ms.m_Namespace}.{cls}）")
         empty_refs = not getattr(getattr(obj, "assets_file", None), "ref_types", None)
         key = (assembly, ms.m_Namespace, cls, empty_refs)
         full = f"{ms.m_Namespace}.{cls}" if ms.m_Namespace else cls

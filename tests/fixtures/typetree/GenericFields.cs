@@ -19,6 +19,10 @@ namespace Fixture
     }
     public class Numbers : Holder<int> { }
     public class Words : Holder<string> { }
+    [Serializable] public class Box<T> { public T value; public T second; }
+    [Serializable] public class Inner : Box<int> { }
+    public class Rebound : Box<Inner> { }
+    public class DirectBox : UnityEngine.MonoBehaviour { public Box<Box<int>> nested; }
     [Serializable] public class Values
     {
         [UnityEngine.SerializeReference] public List<IValue> items;

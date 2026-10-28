@@ -373,6 +373,25 @@ class TypeTree(unittest.TestCase):
         with self.assertRaises(ValueError):
             ctx.tree(SimpleNamespace(serialized_type=None))
 
+    def test_missing_assembly_and_empty_script_do_not_enter_native_generator(self):
+        from unittest.mock import Mock
+        ctx = _Context.__new__(_Context)
+        ctx.gen, ctx.nodes, ctx.assemblies = Mock(), {}, {"Assembly-CSharp.dll"}
+        ms = SimpleNamespace(m_ClassName="Missing", m_AssemblyName="", m_Namespace="Game")
+        ctx.script = lambda obj: ms
+        obj = SimpleNamespace(serialized_type=None)
+        for assembly in ("", "BroAudioEditor.dll", "VRCCore-Editor.dll", "Assembly-CSharp-Editor.dll"):
+            ms.m_AssemblyName = assembly
+            with self.assertRaises(ValueError):
+                ctx.tree(obj)
+        ms.m_AssemblyName, ms.m_ClassName = "Assembly-CSharp.dll", ""
+        with self.assertRaises(ValueError):
+            ctx.tree(obj)
+        ctx.gen.get_nodes_as_json.assert_not_called()
+        obj.serialized_type = SimpleNamespace(node=object())
+        obj.read_typetree = lambda: {"text": "stored"}
+        self.assertEqual(ctx.tree(obj)[1], {"text": "stored"})
+
     def test_normalizes_assembly_and_keeps_other_classes_readable(self):
         from unittest.mock import Mock
         ctx = _Context.__new__(_Context)
