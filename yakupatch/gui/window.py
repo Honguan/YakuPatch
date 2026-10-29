@@ -113,7 +113,8 @@ class MainWindow(QMainWindow):
         self.rows: dict[str, dict] = {}            # key -> library row as last shown
         self.batch_job = None
         self.batch_index = None
-        self._dirty = QTimer(self, singleShot=True, interval=300, timeout=self._refresh_counts)
+        self._dirty = QTimer(self, singleShot=True, interval=200,
+                             timeout=lambda: self._refresh_counts(history=False))
         self._build()
         self.refresh_library()
 
@@ -464,7 +465,7 @@ class MainWindow(QMainWindow):
                 self.preview_button.setEnabled(False)
                 self.apply_button.setEnabled(False)
             else:
-                self.preview_button.setEnabled(not self._row(self.key)["no_need"])
+                self.preview_button.setEnabled(not self.rows.get(self.key, {}).get("no_need", False))
                 self.apply_button.setEnabled(bool(self.plan and self.plan.files))
 
     @staticmethod
@@ -790,16 +791,20 @@ class MainWindow(QMainWindow):
     def _store_changed(self, key, ids):
         if key == self.key:
             self.model.changed(ids)
-            self._dirty.start()
+            if not self._dirty.isActive():
+                self._dirty.start()
 
     # ---------- overview & steps ----------
-    def _refresh_counts(self):
+    def _refresh_counts(self, history=True):
         if not self.key:
             return
         game, plugin, store = self.current
         c = core.counts(store)
         entry = self.lib.games.get(self.key, {})
         row = self._row(self.key)
+        if self.translation and self.translation[1] == self.key and self.translation[0].state in ("queued", "running"):
+            row["status"] = tr("翻譯中")
+        self.rows[self.key] = row
         probe = store.manifest.get("language_probe") or entry.get("probe") or {}
         extracted, applied = bool(store.manifest), bool(core.Backup(game).files)
         todo = c["translated"] + c["reviewed"] + c["pending"] + c["failed"]
@@ -840,7 +845,8 @@ class MainWindow(QMainWindow):
         if zh:
             self.primary.setText(tr("啟動遊戲"))
         self.count_label.setText(tr("{} 句").format(self.proxy.rowCount()))
-        self.load_history()
+        if history:
+            self.load_history()
         self._translation_buttons()
 
     def primary_action(self):

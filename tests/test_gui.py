@@ -169,6 +169,32 @@ class Gui(unittest.TestCase):
         with patch.object(win, "make_backend", side_effect=AssertionError("duplicate estimate")):
             win.start_translation()
 
+    def test_continuous_changes_refresh_without_reloading_history(self):
+        win = self.win
+        with patch.object(win, "_refresh_counts") as refresh, patch.object(win.model, "changed"):
+            for _ in range(8):
+                win._store_changed(self.key, [])
+                QTest.qWait(60)
+            self.assertGreaterEqual(refresh.call_count, 1)
+            refresh.assert_called_with(history=False)
+        win._dirty.stop()
+        with patch.object(win, "load_history", side_effect=AssertionError("history reload")):
+            win._refresh_counts(history=False)
+
+    def test_progress_does_not_read_library_from_disk(self):
+        from types import SimpleNamespace
+        job = SimpleNamespace(state="running", key="test", label="test", progress={"total": 100})
+        win = self.win
+        win.jobs.append(job)
+        try:
+            with patch.object(win, "_row", side_effect=AssertionError("disk read")):
+                for i in range(100):
+                    job.progress["translated"] = i
+                    win._job_changed(job)
+            self.assertEqual(win.job_bar.value(), 99)
+        finally:
+            win.jobs.remove(job)
+
     def test_preview_and_apply_are_serialized_for_same_game(self):
         from yakupatch.writeback import ApplyPlan
         win=self.win;entered=threading.Event();release=threading.Event();written=threading.Event()
