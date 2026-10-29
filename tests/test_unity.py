@@ -105,6 +105,31 @@ class MonoStrings(unittest.TestCase):
 
 
 class TypeTree(unittest.TestCase):
+    def test_font_bulk_write_matches_original_layout(self):
+        from unittest.mock import Mock
+        from UnityPy.helpers.TypeTreeHelper import write_typetree
+        from UnityPy.helpers.TypeTreeNode import TypeTreeNode
+        from UnityPy.streams import EndianBinaryWriter
+        from yakupatch.engines.unity import _save_font
+        for endian in ("<", ">"):
+            for length in (0, 1, 3, 4, 257):
+                nodes = TypeTreeNode.from_list([
+                    dict(m_Level=l, m_Type=t, m_Name=n, m_ByteSize=-1, m_Version=1, m_MetaFlag=f)
+                    for l, t, n, f in [(0,"Font","Base",0), (1,"int","before",0),
+                        (1,"vector","m_FontData",0), (2,"Array","Array",0x4000),
+                        (3,"int","size",0), (3,"UInt8","data",0), (1,"int","after",0)]])
+                font = bytes(i % 256 for i in range(length))
+                tree = {"before":17,"m_FontData":list(font),"after":99}
+                expected = EndianBinaryWriter(endian=endian)
+                write_typetree(tree,nodes,expected)
+                obj = Mock();obj._get_typetree_node.return_value = nodes
+                actual = EndianBinaryWriter(endian=endian)
+                obj.save_typetree.side_effect = lambda data, schema: write_typetree(data,schema,actual)
+                _save_font(obj,tree,font)
+                self.assertEqual(actual.bytes,expected.bytes)
+                self.assertIs(tree["m_FontData"],font)
+                self.assertEqual(nodes.m_Children[1].m_Type,"vector")
+
     def test_scan_fingerprint_detects_content_and_backup_changes(self):
         import tempfile
         import os

@@ -98,6 +98,32 @@ class Gui(unittest.TestCase):
     def idle(self):
         self.assertTrue(wait(lambda: not self.win.callbacks))
 
+    def test_library_filter_reuses_rows_and_open_store(self):
+        with patch.object(self.win.lib, "row", side_effect=AssertionError("disk reload")):
+            self.win.search.setText("missing")
+            self.assertEqual(self.win.lib_list.count(), 0)
+            self.win.search.clear()
+            self.assertEqual(self.win.lib_list.count(), 1)
+        with patch("yakupatch.core.Store", side_effect=AssertionError("store reloaded")):
+            self.win._refresh_counts()
+
+    def test_preview_and_apply_are_serialized_for_same_game(self):
+        from yakupatch.writeback import ApplyPlan
+        win=self.win;entered=threading.Event();release=threading.Event();written=threading.Event()
+        def preview(*args):
+            entered.set();release.wait(5);return ApplyPlan()
+        try:
+            with patch("yakupatch.core.preview", side_effect=preview), patch("yakupatch.core.apply", side_effect=lambda *a: written.set()):
+                win.preview()
+                self.assertTrue(entered.wait(2))
+                win.plan=ApplyPlan();win.apply()
+                QTest.qWait(50)
+                self.assertFalse(written.is_set())
+                release.set();self.idle()
+                self.assertTrue(written.is_set())
+        finally:
+            release.set()
+
     def test_model_filter_and_store_events(self):
         store = Store(project_dir(self.game, engines.PLUGINS[0], self.home))
         core.extract(self.game, engines.PLUGINS[0], store)
@@ -175,7 +201,7 @@ class Gui(unittest.TestCase):
         win.extract()
         self.idle()
         pending = []
-        with patch.object(win, "run_bg", side_effect=lambda fn, done, label: pending.append(done)):
+        with patch.object(win, "run_bg", side_effect=lambda fn, done, label, **kw: pending.append(done)):
             win.preview()
         win.set_builtin_chinese(self.key, True)
         from types import SimpleNamespace

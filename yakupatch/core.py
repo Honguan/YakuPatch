@@ -444,7 +444,7 @@ class Library:
             self.games.pop(key, None)
         self._save()
 
-    def row(self, key: str, home: Path | None = None) -> dict:
+    def row(self, key: str, home: Path | None = None, store: Store | None = None) -> dict:
         """Name, engine, language label, status and progress of one library row (§11.3)."""
         e, game = self.games[key], Path(key)
         row = {"key": key, "name": game.parent.name if game.name.lower() == "www" else game.name,
@@ -456,8 +456,8 @@ class Library:
         if row["reason"]:
             return {**row, "status": "不支援"}
         plugin = next(p for p in engines.PLUGINS if p.name == e["engine"])
-        project = project_dir(game, plugin, home)
-        store = Store(project)
+        project = store.dir if store is not None else project_dir(game, plugin, home)
+        store = store if store is not None else Store(project)
         probe = _chinese_probe(e, store.manifest)
         if probe:
             row.update(no_need=True, reason=_probe_text(probe),

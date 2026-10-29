@@ -2,6 +2,7 @@
 import re
 import shutil
 import unicodedata
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -16,6 +17,24 @@ from .safety import read_bytes, safe_path
 
 class GameChanged(Exception):
     pass
+
+
+class _Texts(Mapping):
+    """Binary-output engines only need file names; decode text when an engine actually asks for it."""
+    def __init__(self, originals, plugin, game_dir):
+        self.originals, self.plugin, self.game_dir = originals, plugin, game_dir
+        self.cache = {}
+
+    def __iter__(self):
+        return iter(self.originals)
+
+    def __len__(self):
+        return len(self.originals)
+
+    def __getitem__(self, rel):
+        if rel not in self.cache:
+            self.cache[rel] = self.plugin.decode(rel, self.originals[rel], self.game_dir)[0]
+        return self.cache[rel]
 
 
 @dataclass
@@ -66,7 +85,7 @@ def plan(game_dir: Path, store: Store, plugin: EnginePlugin) -> ApplyPlan:
                 parts = [wrap(p, limits[rec["kind"]], codes) for p in parts]
             parts = [plugin.fit(rec["kind"], p) for p in parts]
             repl[ref["file"]].update(zip(ref["locs"], parts))
-    texts = {rel: plugin.decode(rel, originals[rel], game_dir)[0] for rel in infos}
+    texts = _Texts(originals, plugin, game_dir)
     outputs = plugin.outputs(texts, {rel: r for rel, r in repl.items() if r}, game_dir)
     if outputs is not None:                       # new files beside the game; the originals stay untouched
         for rel in sorted(set(outputs) | {r for r in backup.files if backup.is_created(r)}):

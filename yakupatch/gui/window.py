@@ -163,10 +163,10 @@ class MainWindow(QMainWindow):
         left = QWidget()
         lv = QVBoxLayout(left)
         self.search = QLineEdit(placeholderText=tr("搜尋遊戲"))
-        self.search.textChanged.connect(self.refresh_library)
+        self.search.textChanged.connect(lambda: self.refresh_library(reload=False))
         self.lib_filter = QComboBox()
         self.lib_filter.addItems([tr(s) for s in ("全部", "未處理", "翻譯中", "已提取", "已寫回", "不需翻譯", "不支援")])
-        self.lib_filter.currentIndexChanged.connect(self.refresh_library)
+        self.lib_filter.currentIndexChanged.connect(lambda: self.refresh_library(reload=False))
         self.lib_list = QListWidget()
         self.lib_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.lib_list.currentItemChanged.connect(lambda item, _: item and self.select_game(item.data(Qt.UserRole)))
@@ -448,6 +448,14 @@ class MainWindow(QMainWindow):
         if job is self.batch_job:
             self._show_batch(job)
         self._translation_buttons()
+        if self.key:
+            busy = any(j.key == ("game", str(self.current[0].resolve())) for j in live)
+            if busy:
+                self.preview_button.setEnabled(False)
+                self.apply_button.setEnabled(False)
+            else:
+                self.preview_button.setEnabled(not self._row(self.key)["no_need"])
+                self.apply_button.setEnabled(bool(self.plan and self.plan.files))
 
     @staticmethod
     def _job_text(j) -> str:
@@ -544,14 +552,17 @@ class MainWindow(QMainWindow):
             self.tabs.setEnabled(False)
         self.refresh_library()
 
-    def refresh_library(self):
-        # shortcut: rows are rebuilt from disk on each refresh; cache counts in library.json for very large libraries.
+    def _row(self, key):
+        opened = self.games.get(key)
+        return self.lib.row(key, self.home, store=opened[2] if opened else None)
+
+    def refresh_library(self, reload=True):
         current = self.key
         q, wanted = self.search.text().strip().lower(), self.lib_filter.currentText()
         rows = []
         for key in self.lib.games:
             try:
-                row = self.lib.row(key, self.home)
+                row = self._row(key) if reload or key not in self.rows else dict(self.rows[key])
             except (OSError, ValueError, StopIteration) as ex:
                 row = {"key": key, "name": Path(key).name, "engine": "?", "lang": "", "status": tr("不支援"),
                        "progress": 0, "no_need": False, "reason": str(ex)}
@@ -611,7 +622,7 @@ class MainWindow(QMainWindow):
         if not keys:
             QMessageBox.information(self, "YakuPatch", tr("請先在左側選取要翻譯的遊戲（可按 Ctrl／Shift 多選）"))
             return
-        keys = [k for k in keys if not self.lib.row(k, self.home)["no_need"]]
+        keys = [k for k in keys if not self._row(k)["no_need"]]
         if not keys:
             QMessageBox.information(self, "YakuPatch", tr("選取的遊戲不需翻譯，可在遊戲內切換中文"))
             return
@@ -757,7 +768,7 @@ class MainWindow(QMainWindow):
         game, plugin, store = self.current
         c = core.counts(store)
         entry = self.lib.games.get(self.key, {})
-        row = self.lib.row(self.key, self.home)
+        row = self._row(self.key)
         probe = store.manifest.get("language_probe") or entry.get("probe") or {}
         extracted, applied = bool(store.manifest), bool(core.Backup(game).files)
         todo = c["translated"] + c["reviewed"] + c["pending"] + c["failed"]
@@ -813,12 +824,15 @@ class MainWindow(QMainWindow):
             self.launch()
 
     def extract(self, force=False):
-        if self.lib.row(self.key, self.home)["no_need"]:
+        if self._row(self.key)["no_need"]:
             QMessageBox.information(self, "YakuPatch", tr("遊戲內已有中文，不需翻譯"))
             return
         game, plugin, store = self.current
+        key = self.key
 
         def done(job):
+            if self.key != key:
+                return
             if isinstance(job.error, LanguageGateStop):
                 self.lib.games.setdefault(self.key, {})["probe"] = job.error.probe
                 packs = "\n".join(p.hint for p in job.error.packs)
@@ -832,7 +846,7 @@ class MainWindow(QMainWindow):
             self._refresh_counts()
 
         self.stages.busy("提取", tr("提取中"))
-        self.run_bg(lambda job: core.extract(game, plugin, store, force), done, tr("提取"))
+        self.run_bg(lambda job: core.extract(game, plugin, store, force), done, tr("提取"), key=("game", str(game.resolve())))
 
     def select_game_refresh(self):
         key, self.key = self.key, None
@@ -1067,7 +1081,7 @@ class MainWindow(QMainWindow):
     def start_translation(self, only=None, fresh=False):
         if not self.key:
             return
-        if self.lib.row(self.key, self.home)["no_need"]:
+        if self._row(self.key)["no_need"]:
             QMessageBox.information(self, "YakuPatch", tr("遊戲內已有中文，不需翻譯"))
             return
         limit = None
@@ -1251,13 +1265,13 @@ class MainWindow(QMainWindow):
 
     # ---------- writeback tab ----------
     def preview(self):
-        if self.lib.row(self.key, self.home)["no_need"]:
+        if self._row(self.key)["no_need"]:
             return
         game, plugin, store = self.current
         key = self.key
 
         def done(job):
-            if self.key != key or self.lib.row(key, self.home)["no_need"]:
+            if self.key != key or self._row(key)["no_need"]:
                 return
             if self._error(job, tr("無法預覽")):
                 return
@@ -1281,12 +1295,13 @@ class MainWindow(QMainWindow):
             self.wb_notes.setText("\n".join(notes))
             self.apply_button.setEnabled(bool(self.plan.files))
 
-        self.run_bg(lambda job: core.preview(game, store, plugin), done, tr("寫回預覽"))
+        self.run_bg(lambda job: core.preview(game, store, plugin), done, tr("寫回預覽"), key=("game", str(game.resolve())))
 
     def apply(self):
-        if not self.plan or self.lib.row(self.key, self.home)["no_need"]:
+        if not self.plan or self._row(self.key)["no_need"]:
             return
         game = self.current[0]
+        key = self.key
         msg = tr("將修改 {} 個檔案，原檔會先備份到 _yakupatch_backup/。確定寫回？").format(len(self.plan.files))
         if QMessageBox.question(self, tr("寫回遊戲"), msg) != QMessageBox.Yes:
             return
@@ -1294,6 +1309,9 @@ class MainWindow(QMainWindow):
         self.apply_button.setEnabled(False)
 
         def done(job):
+            if self.key != key:
+                return
+            self.plan = None
             if not self._error(job, tr("寫回失敗，遊戲未被修改")):
                 self.statusBar().showMessage(tr("寫回完成"), 5000)
             self.stages.set("寫回", job.error is None, 1, tr("完成") if job.error is None else tr("未完成"))
@@ -1301,14 +1319,18 @@ class MainWindow(QMainWindow):
             self._refresh_counts()
 
         self.stages.busy("寫回", tr("寫回中"))
-        self.run_bg(lambda job: core.apply(game, plan), done, tr("寫回"))
+        self.run_bg(lambda job: core.apply(game, plan), done, tr("寫回"), key=("game", str(game.resolve())))
 
     def restore(self):
         game = self.current[0]
+        key = self.key
         if QMessageBox.question(self, tr("還原遊戲"), tr("把遊戲還原成寫回前的原檔？")) != QMessageBox.Yes:
             return
 
         def done(job):
+            if self.key != key:
+                return
+            self.plan = None
             if self._error(job, tr("還原失敗")):
                 return
             names = {"restored": tr("已還原"), "original": tr("已是原檔"), "stale": tr("遊戲已更新而略過")}
@@ -1323,7 +1345,7 @@ class MainWindow(QMainWindow):
             self.refresh_library()
             self._refresh_counts()
 
-        self.run_bg(lambda job: core.restore(game), done, tr("還原"))
+        self.run_bg(lambda job: core.restore(game), done, tr("還原"), key=("game", str(game.resolve())))
 
     def launch(self):
         try:

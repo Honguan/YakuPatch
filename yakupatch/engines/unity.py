@@ -546,6 +546,28 @@ def _font_chars(tree: dict) -> set[str]:
     return {chr(c["m_Unicode"]) for c in tree.get("m_CharacterTable") or [] if c.get("m_Unicode", 0) < 0x110000}
 
 
+def _save_font(obj, tree: dict, font: bytes) -> None:
+    from UnityPy.helpers.TypeTreeNode import TypeTreeNode
+    nodes = TypeTreeNode.from_list([{k: v for k, v in n.items() if k != "m_Children"}
+                                    for n in obj._get_typetree_node().to_dict_list()])
+    tree["m_FontData"] = font
+    packed = False
+    for node in nodes.m_Children:
+        if node.m_Name != "m_FontData" or not node.m_Children:
+            continue
+        array = node.m_Children[0]
+        if array.m_Type == "Array" and len(array.m_Children) == 2:
+            element = array.m_Children[1]
+            if element.m_Type in ("UInt8", "char") and not (element.m_MetaFlag or 0) & 0x4000:
+                # A byte vector has exactly the same length prefix and payload as TypelessData.
+                node.m_Type, node.m_Children = "TypelessData", []
+                node.m_MetaFlag = (node.m_MetaFlag or 0) | (array.m_MetaFlag or 0)
+                packed = True
+    if not packed:
+        tree["m_FontData"] = list(font)
+    obj.save_typetree(tree, nodes)
+
+
 class Unity(EnginePlugin):
     name = "unity"
     version = "1.0.0"
@@ -619,6 +641,9 @@ class Unity(EnginePlugin):
                     if isinstance(data.m_Script, str):
                         out += _table_entries(data.m_Script, pid)
                 elif t == "MonoBehaviour":
+                    script = ctx.script(obj)
+                    if script and _NOT_TEXT.match(script.m_ClassName):
+                        continue
                     cls, tree, _ = ctx.tree(obj)
                     out += _entries(cls, tree, pid)
             except (ValueError, KeyError, EOFError, IndexError, struct.error, UnicodeDecodeError):
@@ -677,6 +702,9 @@ class Unity(EnginePlugin):
                 if obj.type.name != "MonoBehaviour":
                     continue
                 try:
+                    script = ctx.script(obj)
+                    if not script or script.m_ClassName != "TMP_FontAsset":
+                        continue
                     cls, tree, nodes = ctx.tree(obj)
                 except (ValueError, KeyError, EOFError, IndexError, struct.error):
                     continue
@@ -712,13 +740,17 @@ class Unity(EnginePlugin):
         def ref(sf, p):
             return Path(sf.name).name if p["m_FileID"] == 0 else Path(sf.externals[p["m_FileID"] - 1].path).name
 
-        def read(sf, pid):
+        def read(sf, pid, cls=None):
             try:
+                if cls:
+                    script = ctx.script(sf.objects[pid])
+                    if not script or script.m_ClassName != cls:
+                        return "", {}, None
                 return ctx.tree(sf.objects[pid])
             except (ValueError, KeyError, EOFError, IndexError, struct.error):
                 return "", {}, None
         settings = next(((n, pid) for n, f in files.items() for pid, o in f.objects.items()
-                         if o.type.name == "MonoBehaviour" and read(f, pid)[0] == "TMP_Settings"), None)
+                         if o.type.name == "MonoBehaviour" and read(f, pid, "TMP_Settings")[0] == "TMP_Settings"), None)
         if settings is None:
             return {}
         sname, spid = settings
@@ -745,6 +777,9 @@ class Unity(EnginePlugin):
                 if obj.type.name != "MonoBehaviour":
                     continue
                 try:
+                    script = ctx.script(obj)
+                    if not script or script.m_ClassName != "TMP_FontAsset":
+                        continue
                     tree = ctx.tree(obj)[1]
                 except (ValueError, KeyError, EOFError, IndexError, struct.error):
                     continue
@@ -774,8 +809,7 @@ class Unity(EnginePlugin):
                     obj.save_typetree(tree, nodes) if nodes is not None else obj.save_typetree(tree)
                     fo = sf.objects[src]
                     ft = fo.read_typetree()
-                    ft["m_FontData"] = list(font)
-                    fo.save_typetree(ft)
+                    _save_font(fo, ft, font)
             if rel == srel:
                 obj = sf.objects[spid]
                 _, tree, nodes = ctx.tree(obj)
@@ -801,6 +835,9 @@ class Unity(EnginePlugin):
                     fonts.append(pid)
                 elif obj.type.name == "MonoBehaviour":
                     try:
+                        script = ctx.script(obj)
+                        if not script or script.m_ClassName != "TMP_FontAsset":
+                            continue
                         src = ctx.tree(obj)[1].get("m_SourceFontFile") or {}
                     except (ValueError, KeyError, EOFError, IndexError, struct.error):
                         continue
@@ -820,8 +857,7 @@ class Unity(EnginePlugin):
             for pid, tree in targets:
                 font = _system_font(need, [tree.get("m_Name", "")])
                 if font is not None:
-                    tree["m_FontData"] = list(font)
-                    sf.objects[pid].save_typetree(tree)
+                    _save_font(sf.objects[pid], tree, font)
             out[rel] = _save(root, sf)
         return out
 

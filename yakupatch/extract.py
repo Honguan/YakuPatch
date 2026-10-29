@@ -84,7 +84,10 @@ def extract(game_dir: Path, plugin: EnginePlugin, store: Store, force: bool = Fa
     lang, packs = probe(game_dir, plugin, segments)
     if not force and langdetect.has_chinese(lang):
         raise LanguageGateStop(lang, packs)
-    units = [u for rel in files for u in segment(rel, [s for r, s in segments if r == rel])]  # E6
+    by_file = {rel: [] for rel in files}
+    for rel, seg in segments:
+        by_file[rel].append(seg)
+    units = [u for rel, segs in by_file.items() for u in segment(rel, segs)]  # E6
     for u in units:
         u.status, u.flags = classify(u)                                  # E7
     records = dedupe(units)                                               # E8 speaker is set by the plugin; E9
