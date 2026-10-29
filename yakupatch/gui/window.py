@@ -180,7 +180,7 @@ class MainWindow(QMainWindow):
                 (tr("移除不需翻譯"), lambda: self.remove_where(lambda r: r["no_need"], tr("不需翻譯"))),
                 (tr("移除不支援"), lambda: self.remove_where(lambda r: r["status"] == tr("不支援"), tr("不支援"))))):
             buttons.addWidget(QPushButton(text, clicked=slot), n // 2, n % 2)
-        self.batch_apply = QCheckBox(tr("完成後寫回遊戲"))
+        self.batch_apply = QCheckBox(tr("批次翻譯完成後寫回"))
         buttons.addWidget(QPushButton(tr("批次翻譯選取遊戲"), clicked=self.batch_translate), 1, 0)
         buttons.addWidget(self.batch_apply, 1, 1)
         lv.addLayout(buttons)
@@ -191,12 +191,11 @@ class MainWindow(QMainWindow):
         self.title.setStyleSheet("font-size: 16pt; font-weight: 600")
         rv.addWidget(self.title)
         steps = QHBoxLayout()
-        self.step_buttons = []
+        self.step_labels = []
         for i, name in enumerate(STEPS):
-            b = QPushButton(tr(name), flat=True)
-            b.clicked.connect(lambda _=False, i=i: self.tabs.setCurrentIndex([0, 0, 0, 3, 4][i]))
+            b = QLabel(tr(name), alignment=Qt.AlignCenter)
             steps.addWidget(b)
-            self.step_buttons.append(b)
+            self.step_labels.append(b)
         rv.addLayout(steps)
         self.tabs = QTabWidget()
         for widget, name in ((self._overview(), "總覽"), (self._text(), "文本"), (self._glossary(), "術語"),
@@ -215,11 +214,13 @@ class MainWindow(QMainWindow):
         jobs = QHBoxLayout()
         self.job_label = QLabel(tr("工作佇列：沒有工作"))
         self.job_pause = QPushButton(tr("暫停"), clicked=self.pause_job)
+        self.resume_button = QPushButton(tr("繼續"), clicked=self.resume_job)
         self.job_cancel = QPushButton(tr("取消"), clicked=self.cancel_job)
         self.job_bar = QProgressBar(maximumWidth=240, visible=False)
         jobs.addWidget(self.job_label, 1)
         jobs.addWidget(self.job_bar)
         jobs.addWidget(self.job_pause)
+        jobs.addWidget(self.resume_button)
         jobs.addWidget(self.job_cancel)
         cv.addLayout(jobs)
         self.setCentralWidget(central)
@@ -368,11 +369,7 @@ class MainWindow(QMainWindow):
         v.addLayout(form)
         ctl = QHBoxLayout()
         self.start_button = QPushButton(tr("開始翻譯"), clicked=lambda: self.start_translation())
-        self.pause_button = QPushButton(tr("暫停"), clicked=self.pause_job)
-        self.resume_button = QPushButton(tr("繼續"), clicked=self.resume_job)
-        self.cancel_button = QPushButton(tr("取消"), clicked=self.cancel_job)
-        for b in (self.start_button, self.pause_button, self.resume_button, self.cancel_button):
-            ctl.addWidget(b)
+        ctl.addWidget(self.start_button)
         v.addLayout(ctl)
         self.stages = StageBars()
         self.progress_label = QLabel()
@@ -800,7 +797,7 @@ class MainWindow(QMainWindow):
         self.title.setText(f"{game.name if game.name.lower() != 'www' else game.parent.name}    "
                            f"{plugin.name}  [{row['lang']}]")
         marks = [True, bool(probe), extracted, extracted and c["pending"] + c["failed"] == 0 and todo > 0, applied]
-        for b, name, ok, i in zip(self.step_buttons, STEPS, marks, range(5)):
+        for b, name, ok, i in zip(self.step_labels, STEPS, marks, range(5)):
             b.setText(tr(name) + (" ✓" if ok else f" {pct}%" if i == 3 and extracted else ""))
         self.info.setText(tr("路徑：{}\n引擎：{}（偵測分數 {:.2f}）\n文本檔：{} 個\n句數：共 {}，待翻 {}，已翻 {}，"
                              "已審閱 {}，失敗 {}，不翻 {}，不確定 {}").format(
@@ -826,8 +823,8 @@ class MainWindow(QMainWindow):
         if row["no_need"]:
             self.lang_card.setText(tr("不需翻譯：{}\n請在遊戲設定切換中文。").format(row["reason"]))
         self.force_button.setVisible(False)
-        self.primary.setText(tr("開始提取") if not extracted else tr("開始翻譯") if c["pending"] + c["failed"] else
-                             tr("寫回遊戲") if not applied else tr("啟動遊戲"))
+        self.primary.setText(tr("開始提取") if not extracted else tr("前往翻譯") if c["pending"] + c["failed"] else
+                             tr("預覽寫回") if not applied else tr("啟動遊戲"))
         if zh:
             self.primary.setText(tr("啟動遊戲"))
         self.count_label.setText(tr("{} 句").format(self.proxy.rowCount()))
@@ -837,9 +834,9 @@ class MainWindow(QMainWindow):
         text = self.primary.text()
         if text == tr("開始提取"):
             self.extract()
-        elif text == tr("開始翻譯"):
+        elif text == tr("前往翻譯"):
             self.tabs.setCurrentIndex(3)
-        elif text == tr("寫回遊戲"):
+        elif text == tr("預覽寫回"):
             self.tabs.setCurrentIndex(4)
             self.preview()
         else:
@@ -1204,8 +1201,6 @@ class MainWindow(QMainWindow):
     def _translation_buttons(self):
         job = self.translation[0] if self.translation else None
         live = job is not None and job.state in ("queued", "running")
-        self.pause_button.setEnabled(live)
-        self.cancel_button.setEnabled(live)
         self.job_pause.setEnabled(live)
         self.job_cancel.setEnabled(live)
         self.resume_button.setEnabled(job is not None and (job.state == "paused" or isinstance(job.error, NEEDS_USER)))

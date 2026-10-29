@@ -121,6 +121,19 @@ class Gui(unittest.TestCase):
             self.assertIs(win.lib_list.item(0), item)
             self.assertFalse(item.isHidden())
 
+    def test_job_controls_have_one_entry_and_overview_only_navigates(self):
+        from PySide6.QtWidgets import QPushButton, QLabel
+        win = self.win
+        for text in ("暫停", "繼續", "取消"):
+            self.assertEqual(sum(b.text() == text for b in win.findChildren(QPushButton)), 1)
+        self.assertTrue(all(isinstance(label, QLabel) for label in win.step_labels))
+        win.extract()
+        self.idle()
+        self.assertEqual(win.primary.text(), "前往翻譯")
+        with patch.object(win, "start_translation", side_effect=AssertionError("translation started")):
+            win.primary.click()
+            self.assertEqual(win.tabs.currentIndex(), 3)
+
     def test_preview_and_apply_are_serialized_for_same_game(self):
         from yakupatch.writeback import ApplyPlan
         win=self.win;entered=threading.Event();release=threading.Event();written=threading.Event()
@@ -236,7 +249,7 @@ class Gui(unittest.TestCase):
         win.extract()
         self.idle()
         self.assertGreater(win.model.rowCount(), 0)
-        self.assertEqual(win.primary.text(), "開始翻譯")
+        self.assertEqual(win.primary.text(), "前往翻譯")
         store = win.current[2]
 
         gate = threading.Event()
@@ -276,7 +289,7 @@ class Gui(unittest.TestCase):
         win.apply()
         self.idle()
         self.assertNotEqual(snapshot(self.game), self.original)
-        self.assertIn("✓", win.step_buttons[4].text())
+        self.assertIn("✓", win.step_labels[4].text())
 
         run = next(r["run"] for r in core.history(store) if r["by"].startswith("ids"))
         win.load_history()
