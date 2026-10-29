@@ -155,6 +155,20 @@ class Gui(unittest.TestCase):
         button.menu().actions()[0].trigger()
         callback.assert_called_once()
 
+    def test_translation_scope_and_estimate_guard(self):
+        win = self.win
+        self.assertFalse(win.trial.isEnabled())
+        win.scope.button(3).setChecked(True)
+        self.assertTrue(win.trial.isEnabled())
+        win.scope.button(1).setChecked(True)
+        self.assertFalse(win.start_button.isEnabled())
+        self.assertIn("0 句", win.scope.button(1).text())
+        win.estimating = True
+        win._translation_buttons()
+        self.assertEqual(win.start_button.text(), "估算中…")
+        with patch.object(win, "make_backend", side_effect=AssertionError("duplicate estimate")):
+            win.start_translation()
+
     def test_preview_and_apply_are_serialized_for_same_game(self):
         from yakupatch.writeback import ApplyPlan
         win=self.win;entered=threading.Event();release=threading.Event();written=threading.Event()

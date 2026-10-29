@@ -231,6 +231,8 @@ class MainWindow(QMainWindow):
         jobs.addWidget(self.job_cancel)
         cv.addLayout(jobs)
         self.setCentralWidget(central)
+        self.scope.idToggled.connect(lambda *_: self._translation_buttons())
+        self.table.selectionModel().selectionChanged.connect(lambda *_: self._translation_buttons())
         self._translation_buttons()
         QShortcut(QKeySequence("Ctrl+F"), self, activated=lambda: (self.tabs.setCurrentIndex(1), self.query.setFocus()))
 
@@ -839,6 +841,7 @@ class MainWindow(QMainWindow):
             self.primary.setText(tr("啟動遊戲"))
         self.count_label.setText(tr("{} 句").format(self.proxy.rowCount()))
         self.load_history()
+        self._translation_buttons()
 
     def primary_action(self):
         text = self.primary.text()
@@ -1110,6 +1113,8 @@ class MainWindow(QMainWindow):
     def start_translation(self, only=None, fresh=False):
         if not self.key:
             return
+        if getattr(self, "estimating", False):
+            return
         if self._row(self.key)["no_need"]:
             QMessageBox.information(self, "YakuPatch", tr("遊戲內已有中文，不需翻譯"))
             return
@@ -1135,6 +1140,8 @@ class MainWindow(QMainWindow):
             return core.estimate(store, plugin, backend, limit, only, fresh, prepare=True)
 
         def estimated(job):
+            self.estimating = False
+            self._translation_buttons()
             if job.error:
                 self._error(job, tr("無法開始翻譯"))
                 self._handle_user_error(job, name)
@@ -1159,10 +1166,14 @@ class MainWindow(QMainWindow):
 
             job = self.run_bg(work, lambda j: self._translated(j, name), label, key=name)
             self.translation = (job, key)
+            self.tabs.setCurrentIndex(3)
+            self._translation_buttons()
             self.action_box.hide()
             self._show_progress(job)
             self.refresh_library()
 
+        self.estimating = True
+        self._translation_buttons()
         self.run_bg(estimate, estimated, tr("用量預估"))
 
     def _show_progress(self, job):
@@ -1211,6 +1222,13 @@ class MainWindow(QMainWindow):
     def _translation_buttons(self):
         job = self.translation[0] if self.translation else None
         live = job is not None and job.state in ("queued", "running")
+        estimating = getattr(self, "estimating", False)
+        self.trial.setEnabled(self.scope.checkedId() == 3 and not live and not estimating)
+        selected = len(self.selected_ids())
+        self.scope.button(1).setText(tr("選取句子（{} 句）").format(selected))
+        self.start_button.setText(tr("估算中…") if estimating else tr("翻譯進行中") if live else tr("開始翻譯"))
+        self.start_button.setEnabled(bool(self.key) and not live and not estimating and
+                                     (self.scope.checkedId() != 1 or selected > 0))
         self.job_pause.setEnabled(live)
         self.job_cancel.setEnabled(live)
         self.resume_button.setEnabled(job is not None and (job.state == "paused" or isinstance(job.error, NEEDS_USER)))
