@@ -24,7 +24,10 @@ def main() -> int:
     app.setWindowIcon(QIcon(str(Path(__file__).with_name("icon.ico"))))
     window = MainWindow()
     window.show()
-    print("Main window is open. Closing this console window also closes YakuPatch.", flush=True)
+    print("GUI 已開啟：操作請使用主視窗；工具列「工作紀錄」與此視窗同步顯示工作狀態。", flush=True)
+    print("此命令視窗保留原生元件與錯誤的詳細輸出。請最小化即可；關閉它也會關閉 YakuPatch。", flush=True)
     window.check_update()
     window.autostart_sakura()
-    return app.exec()
+    result = app.exec()
+    print(f"YakuPatch GUI 已結束（代碼 {result}）。", flush=True)
+    return result

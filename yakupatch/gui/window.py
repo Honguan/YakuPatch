@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QKeySequence, QShortcut
-from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QGridLayout,
+from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDialog, QDockWidget, QFileDialog, QFormLayout, QGridLayout,
                                QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem,
                                QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSizePolicy,
@@ -106,6 +106,7 @@ class MainWindow(QMainWindow):
         self.games: dict[str, tuple] = {}         # key -> (game, plugin, store), one Store per game (single writer)
         self.callbacks: dict = {}
         self.jobs: list = []
+        self._job_serial = 0
         self.translation = None                   # (job, key) of the job shown on the translate tab
         self.key = None
         self.plan = None
@@ -171,6 +172,15 @@ class MainWindow(QMainWindow):
         self.backend_label = QLabel(tr("後端：未連線"))
         bar.addWidget(self.backend_label)
         bar.addAction(QAction(tr("設定"), self, triggered=lambda: self.open_settings()))
+        self.activity = QPlainTextEdit(readOnly=True)
+        self.activity.document().setMaximumBlockCount(2000)
+        dock = QDockWidget(tr("工作紀錄（與命令視窗同步）"), self)
+        dock.setWidget(self.activity)
+        self.addDockWidget(Qt.BottomDockWidgetArea, dock)
+        dock.hide()
+        action = dock.toggleViewAction()
+        action.setText(tr("工作紀錄"))
+        bar.addAction(action)
 
         left = QWidget()
         lv = QVBoxLayout(left)
@@ -434,12 +444,23 @@ class MainWindow(QMainWindow):
     def run_bg(self, fn, done, label, key=None):
         """`fn(job)` runs on a worker thread; `done(job)` runs on the GUI thread when it ends."""
         job = self.queue.submit(key, fn, label)
+        self._job_serial += 1
+        job.gui_number = self._job_serial
         self.callbacks[job] = done
         self.jobs.append(job)
         self._job_changed(job)
         return job
 
     def _job_changed(self, job):
+        if getattr(job, "gui_number", None) is not None and getattr(job, "gui_state", None) != job.state:
+            job.gui_state = job.state
+            state = {"queued": "排隊中", "running": "進行中", "done": "完成", "failed": "失敗",
+                     "paused": "已暫停", "cancelled": "已取消"}.get(job.state, job.state)
+            message = f"[{time.strftime('%H:%M:%S')}] #{getattr(job, 'gui_number', '—')} {job.label}：{tr(state)}"
+            if getattr(job, "error", None):
+                message += f" — {job.error}"
+            self.activity.appendPlainText(message)
+            print(message, flush=True)
         if job.state in ("done", "failed", "paused", "cancelled") and job in self.callbacks:
             self.callbacks.pop(job)(job)
         live = [j for j in self.jobs if j.state in ("queued", "running")]
@@ -1255,6 +1276,8 @@ class MainWindow(QMainWindow):
         old, key = self.translation
         name = old.key
         job = self.queue.resume(old)
+        self._job_serial += 1
+        job.gui_number = self._job_serial
         self.callbacks[job] = lambda j: self._translated(j, name)
         self.jobs.append(job)
         self.translation = (job, key)

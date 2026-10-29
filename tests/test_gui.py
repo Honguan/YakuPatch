@@ -195,6 +195,23 @@ class Gui(unittest.TestCase):
         finally:
             win.jobs.remove(job)
 
+    def test_activity_matches_console_without_progress_spam(self):
+        from unittest.mock import Mock
+        job = Mock(state="running", label="提取", gui_number=7, gui_state=None, error=None,
+                   key="test", progress={})
+        win = self.win
+        with patch("builtins.print") as output:
+            win._job_changed(job)
+            win._job_changed(job)
+            self.assertEqual(output.call_count, 1)
+            self.assertEqual(win.activity.toPlainText(), output.call_args.args[0])
+            job.state = "failed"
+            job.error = ValueError("test failure")
+            win._job_changed(job)
+            self.assertEqual(output.call_count, 2)
+            self.assertIn("#7 提取：失敗", win.activity.toPlainText())
+            self.assertIn("test failure", win.activity.toPlainText())
+
     def test_preview_and_apply_are_serialized_for_same_game(self):
         from yakupatch.writeback import ApplyPlan
         win=self.win;entered=threading.Event();release=threading.Event();written=threading.Event()
