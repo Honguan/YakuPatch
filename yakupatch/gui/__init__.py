@@ -42,7 +42,7 @@ def _run(capture) -> int:
     window = MainWindow()
     window.console_capture = True
     window.capture = capture
-    window.activity_path.setText(str(capture.log_path))
+    window.refresh_logs()
     timer = QTimer(app, interval=100, timeout=lambda: window.console_output(capture.drain()))
     timer.start()
     window.show()

@@ -10,6 +10,27 @@ from datetime import datetime
 from collections import deque
 
 
+def is_error(text):
+    return any(word in text.lower() for word in
+               ("error", "exception", "traceback", "fatal", "failed", "錯誤", "失敗", "異常",
+                "object reference", "sequence contains", "given key", "duplicate key"))
+
+
+def read_history(path, query="", errors=False):
+    lines = deque()
+    size = 0
+    count = 0
+    with path.open(encoding="utf-8", errors="replace") as source:
+        for line in source:
+            if query.lower() in line.lower() and (not errors or is_error(line)):
+                count += 1
+                lines.append(line[-200000:])
+                size += len(lines[-1])
+                while len(lines) > 2000 or size > 200000:
+                    size -= len(lines.popleft())
+    return "".join(lines)[-200000:], count
+
+
 class ConsoleCapture:
     def __init__(self):
         from ..extract import projects_home

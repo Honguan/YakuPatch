@@ -1,6 +1,7 @@
 """Main window (§11.2): library on the left, five-step bar, tabs, job queue at the bottom.
 
 Long work runs on core.JobQueue threads; results and Store changes come back through Qt signals."""
+import shutil
 import threading
 import time
 import urllib.request
@@ -12,7 +13,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComb
                                QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem,
                                QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSizePolicy,
-                               QSpinBox, QSplitter, QTableView, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
+                               QSpinBox, QSplitter, QStackedWidget, QTableView, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
                                QWidget)
 
 from .. import core, sakura_kit
@@ -22,6 +23,7 @@ from ..backends.openai_compat import OpenAICompat
 from ..backends.sakura import Sakura
 from ..cli import _LANG, _REASON
 from ..extract import LanguageGateStop
+from .console import is_error, read_history
 from .models import KIND, STATUS, TagEdit, TextFilter, TextModel, tr
 from .settings import SettingsDialog
 
@@ -180,13 +182,28 @@ class MainWindow(QMainWindow):
         controls = QHBoxLayout()
         self.activity_errors = QCheckBox(tr("只看錯誤"))
         self.activity_errors.toggled.connect(self._filter_activity)
+        self.log_choice = QComboBox()
+        self.log_choice.addItem(tr("即時紀錄"), None)
+        self.log_choice.currentIndexChanged.connect(self._select_log)
+        controls.addWidget(self.log_choice)
+        controls.addWidget(QPushButton(tr("重新整理"), clicked=self.refresh_logs))
+        self.log_search = QLineEdit(placeholderText=tr("搜尋紀錄（不分大小寫）"))
+        self._log_request = 0
+        self._log_timer = QTimer(self, singleShot=True, interval=200, timeout=self._select_log)
+        self.log_search.textChanged.connect(lambda: self._log_timer.start())
+        controls.addWidget(self.log_search, 1)
         controls.addWidget(self.activity_errors)
         controls.addStretch()
         controls.addWidget(QPushButton(tr("匯出完整紀錄"), clicked=self.export_activity))
         layout.addLayout(controls)
         self.activity_path = QLabel(textInteractionFlags=Qt.TextSelectableByMouse, wordWrap=True)
         layout.addWidget(self.activity_path)
-        layout.addWidget(self.activity)
+        self.history_log = QPlainTextEdit(readOnly=True)
+        self.history_log.document().setMaximumBlockCount(2000)
+        self.log_views = QStackedWidget()
+        self.log_views.addWidget(self.activity)
+        self.log_views.addWidget(self.history_log)
+        layout.addWidget(self.log_views)
         dock.setWidget(panel)
         self.addDockWidget(Qt.BottomDockWidgetArea, dock)
         dock.hide()
@@ -473,7 +490,8 @@ class MainWindow(QMainWindow):
                 message += f" — {job.error}"
             if not getattr(self, "console_capture", False):
                 self.activity.appendPlainText(message)
-                self._filter_activity()
+                if self.log_choice.currentData() is None:
+                    self._filter_activity()
             print(message, flush=True)
         if job.state in ("done", "failed", "paused", "cancelled") and job in self.callbacks:
             self.callbacks.pop(job)(job)
@@ -537,18 +555,67 @@ class MainWindow(QMainWindow):
             cursor.removeSelectedText()
         if follow:
             bar.setValue(bar.maximum())
-        if self.activity_errors.isChecked():
+        if self.log_choice.currentData() is None and (self.activity_errors.isChecked() or self.log_search.text()):
             self._filter_activity()
 
+    def refresh_logs(self):
+        capture = getattr(self, "capture", None)
+        if capture is None:
+            return
+        selected = self.log_choice.currentData()
+        self.log_choice.blockSignals(True)
+        self.log_choice.clear()
+        self.log_choice.addItem(tr("即時紀錄"), None)
+        for path in sorted(capture.log_path.parent.glob("gui*.log"), key=lambda p: p.stat().st_mtime, reverse=True):
+            if path != capture.log_path:
+                label = tr("上次紀錄 · {}").format(path.name) if self.log_choice.count() == 1 else path.name
+                self.log_choice.addItem(label, str(path))
+        index = self.log_choice.findData(selected)
+        self.log_choice.setCurrentIndex(max(0, index))
+        self.log_choice.blockSignals(False)
+        self._select_log()
+
+    def _select_log(self):
+        self._log_request += 1
+        request = self._log_request
+        path = self.log_choice.currentData()
+        if path is None:
+            self.log_views.setCurrentIndex(0)
+            capture = getattr(self, "capture", None)
+            self.activity_path.setText(str(capture.log_path) if capture else "")
+            self._filter_activity()
+            return
+        path = Path(path)
+        self.log_views.setCurrentIndex(1)
+        self.history_log.clear()
+        self.activity_path.setText(tr("讀取中：{}").format(path))
+        query, errors = self.log_search.text(), self.activity_errors.isChecked()
+
+        def done(job):
+            if request != self._log_request:
+                return
+            if job.error:
+                self.activity_path.setText(tr("讀取失敗：{}").format(job.error))
+                return
+            text, count = job.result
+            self.history_log.setPlainText(text)
+            self.history_log.moveCursor(QTextCursor.End)
+            self.activity_path.setText(tr("{} — 符合 {} 行；顯示最後 2,000 行／200,000 字元").format(path, count))
+
+        self.run_bg(lambda job: read_history(path, query, errors) if request == self._log_request else None,
+                    done, tr("讀取歷史紀錄"), key="log-history")
+
     def _filter_activity(self):
+        if self.log_choice.currentData() is not None:
+            self._select_log()
+            return
         only_errors = self.activity_errors.isChecked()
+        query = self.log_search.text().lower()
         document = self.activity.document()
         block = document.begin()
         while block.isValid():
             text = block.text().lower()
-            block.setVisible(not only_errors or any(word in text for word in
-                             ("error", "exception", "traceback", "fatal", "failed", "錯誤", "失敗", "異常",
-                              "object reference", "sequence contains", "given key", "duplicate key")))
+            block.setVisible(query in text and (not only_errors or is_error(text)))
             block = block.next()
         document.markContentsDirty(0, document.characterCount())
         self.activity.viewport().update()
@@ -558,8 +625,9 @@ class MainWindow(QMainWindow):
         if capture is None:
             QMessageBox.information(self, "YakuPatch", tr("尚無自動儲存紀錄"))
             return
+        source = Path(self.log_choice.currentData()) if self.log_choice.currentData() else capture.log_path
         filename, _ = QFileDialog.getSaveFileName(self, tr("匯出完整工作紀錄"),
-                                                 str(Path.home() / capture.log_path.name), "Log (*.log)")
+                                                 str(Path.home() / source.name), "Log (*.log)")
         if not filename:
             return
 
@@ -567,7 +635,16 @@ class MainWindow(QMainWindow):
             if not self._error(job, tr("匯出紀錄失敗")):
                 self.statusBar().showMessage(tr("紀錄已匯出：{}").format(filename), 10000)
 
-        self.run_bg(lambda job: capture.export(Path(filename)), done, tr("匯出工作紀錄"))
+        def export(job):
+            target = Path(filename)
+            if source.resolve() == target.resolve():
+                raise ValueError("請選擇不同的匯出路徑")
+            if source == capture.log_path:
+                capture.export(target)
+            else:
+                shutil.copyfile(source, target)
+
+        self.run_bg(export, done, tr("匯出工作紀錄"))
 
     def _error(self, job, what) -> bool:
         if job.error is None:

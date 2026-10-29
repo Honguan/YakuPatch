@@ -2,6 +2,20 @@ import json,os,subprocess,sys,unittest
 
 
 class Console(unittest.TestCase):
+    def test_history_search_scans_beyond_display_limit(self):
+        import tempfile
+        from pathlib import Path
+        from yakupatch.gui.console import read_history
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "gui-old.log"
+            path.write_text("ERROR early crash\n" + "normal\n" * 3000, encoding="utf8")
+            text, count = read_history(path, "EARLY", True)
+            self.assertEqual(count, 1)
+            self.assertIn("early crash", text)
+            text, count = read_history(path)
+            self.assertEqual(count, 3001)
+            self.assertLessEqual(len(text.splitlines()), 2000)
+
     def test_missing_stdout_descriptor(self):
         script = """
 import os,sys

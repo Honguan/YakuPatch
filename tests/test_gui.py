@@ -250,6 +250,34 @@ class Gui(unittest.TestCase):
         export.assert_called_once_with(target)
         self.assertEqual(target.read_text(encoding="utf8"), "normal\nERROR\n")
 
+    def test_history_search_and_live_output_are_separate(self):
+        from types import SimpleNamespace
+        win = self.win
+        self.home.mkdir(parents=True, exist_ok=True)
+        old = self.home / "gui-20200101.log"
+        old.write_text("normal\nERROR previous crash\n", encoding="utf8")
+        win.capture = SimpleNamespace(log_path=self.home / "gui-current.log")
+        win.refresh_logs()
+        win.log_choice.setCurrentIndex(win.log_choice.findData(str(old)))
+        self.idle()
+        self.assertIn("previous crash", win.history_log.toPlainText())
+        win.console_output("live output\n")
+        self.assertNotIn("live output", win.history_log.toPlainText())
+        win.log_search.setText("PREVIOUS")
+        QTest.qWait(250)
+        self.idle()
+        self.assertEqual(win.history_log.toPlainText().strip(), "ERROR previous crash")
+        win.refresh_logs()
+        self.idle()
+        self.assertEqual(win.log_choice.currentData(), str(old))
+        target = self.home / "history-export.log"
+        with patch("yakupatch.gui.window.QFileDialog.getSaveFileName", return_value=(str(target), "")):
+            win.export_activity()
+            self.idle()
+        self.assertEqual(target.read_bytes(), old.read_bytes())
+        win.log_choice.setCurrentIndex(0)
+        self.assertIn("live output", win.activity.toPlainText())
+
     def test_preview_and_apply_are_serialized_for_same_game(self):
         from yakupatch.writeback import ApplyPlan
         win=self.win;entered=threading.Event();release=threading.Event();written=threading.Event()
