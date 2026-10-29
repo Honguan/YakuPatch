@@ -168,6 +168,7 @@ class MainWindow(QMainWindow):
         self.lib_filter.addItems([tr(s) for s in ("全部", "未處理", "翻譯中", "已提取", "已寫回", "不需翻譯", "不支援")])
         self.lib_filter.currentIndexChanged.connect(lambda: self.refresh_library(reload=False))
         self.lib_list = QListWidget()
+        self.lib_list.setUniformItemSizes(True)
         self.lib_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.lib_list.currentItemChanged.connect(lambda item, _: item and self.select_game(item.data(Qt.UserRole)))
         self.lib_list.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -557,12 +558,14 @@ class MainWindow(QMainWindow):
         return self.lib.row(key, self.home, store=opened[2] if opened else None)
 
     def refresh_library(self, reload=True):
+        if not reload:
+            self._filter_library()
+            return
         current = self.key
-        q, wanted = self.search.text().strip().lower(), self.lib_filter.currentText()
         rows = []
         for key in self.lib.games:
             try:
-                row = self._row(key) if reload or key not in self.rows else dict(self.rows[key])
+                row = self._row(key)
             except (OSError, ValueError, StopIteration) as ex:
                 row = {"key": key, "name": Path(key).name, "engine": "?", "lang": "", "status": tr("不支援"),
                        "progress": 0, "no_need": False, "reason": str(ex)}
@@ -574,8 +577,6 @@ class MainWindow(QMainWindow):
         self.lib_list.blockSignals(True)
         self.lib_list.clear()
         for r in rows:
-            if q and q not in r["name"].lower() or wanted != tr("全部") and r["status"] != wanted:
-                continue
             label = r["status"] if r["no_need"] or r["status"] == "不支援" else f"{r['status']} {r['progress']}%"
             item = QListWidgetItem(f"{r['name']}\n  {r['engine']}  [{r['lang'] or '—'}]  {label}")
             item.setData(Qt.UserRole, r["key"])
@@ -587,6 +588,27 @@ class MainWindow(QMainWindow):
             if r["key"] == current:
                 self.lib_list.setCurrentItem(item)
         self.lib_list.blockSignals(False)
+        self._filter_library()
+
+    def _filter_library(self):
+        q, wanted = self.search.text().strip().lower(), self.lib_filter.currentText()
+        self.lib_list.setUpdatesEnabled(False)
+        self.lib_list.blockSignals(True)
+        try:
+            for i in range(self.lib_list.count()):
+                item = self.lib_list.item(i)
+                row = self.rows[item.data(Qt.UserRole)]
+                hidden = bool(q and q not in row["name"].lower() or
+                              wanted != tr("全部") and row["status"] != wanted)
+                if item.isHidden() != hidden:
+                    item.setHidden(hidden)
+                if hidden:
+                    item.setSelected(False)
+                    if item is self.lib_list.currentItem():
+                        self.lib_list.setCurrentItem(None)
+        finally:
+            self.lib_list.blockSignals(False)
+            self.lib_list.setUpdatesEnabled(True)
 
     def _library_menu(self, pos):
         item = self.lib_list.itemAt(pos)

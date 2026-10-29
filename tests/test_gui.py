@@ -101,11 +101,25 @@ class Gui(unittest.TestCase):
     def test_library_filter_reuses_rows_and_open_store(self):
         with patch.object(self.win.lib, "row", side_effect=AssertionError("disk reload")):
             self.win.search.setText("missing")
-            self.assertEqual(self.win.lib_list.count(), 0)
+            self.assertTrue(self.win.lib_list.item(0).isHidden())
             self.win.search.clear()
             self.assertEqual(self.win.lib_list.count(), 1)
+            self.assertFalse(self.win.lib_list.item(0).isHidden())
         with patch("yakupatch.core.Store", side_effect=AssertionError("store reloaded")):
             self.win._refresh_counts()
+
+    def test_filter_keeps_items_without_reloading_game(self):
+        win = self.win
+        item = win.lib_list.item(0)
+        item.setSelected(True)
+        with patch.object(win.lib_list, "clear", side_effect=AssertionError("list rebuilt")), \
+             patch.object(win, "_open_game", side_effect=AssertionError("game reloaded")):
+            win.lib_filter.setCurrentText("已寫回")
+            self.assertTrue(item.isHidden())
+            self.assertFalse(item.isSelected())
+            win.lib_filter.setCurrentText("全部")
+            self.assertIs(win.lib_list.item(0), item)
+            self.assertFalse(item.isHidden())
 
     def test_preview_and_apply_are_serialized_for_same_game(self):
         from yakupatch.writeback import ApplyPlan
