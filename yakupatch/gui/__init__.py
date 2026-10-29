@@ -14,15 +14,18 @@ def main() -> int:
         sys.stderr = open(log, "a", encoding="utf-8", buffering=1)
     from .console import ConsoleCapture
     capture = ConsoleCapture()
+    normal = False
     try:
-        return _run(capture)
+        result = _run(capture)
+        normal = result == 0
+        return result
     except BaseException:
         with capture.lock:
             capture.log.write(traceback.format_exc().encode("utf-8", errors="replace"))
         raise
     finally:
         faulthandler.disable()
-        capture.close()
+        capture.close(normal=normal)
         faulthandler.enable(sys.stderr)
 
 
@@ -43,6 +46,8 @@ def _run(capture) -> int:
     window.console_capture = True
     window.capture = capture
     window.refresh_logs()
+    if capture.previous_log:
+        window.show_previous_crash(capture.previous_log)
     timer = QTimer(app, interval=100, timeout=lambda: window.console_output(capture.drain()))
     timer.start()
     window.show()

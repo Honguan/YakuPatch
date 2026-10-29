@@ -23,7 +23,7 @@ from ..backends.openai_compat import OpenAICompat
 from ..backends.sakura import Sakura
 from ..cli import _LANG, _REASON
 from ..extract import LanguageGateStop
-from .console import is_error, read_history
+from .console import is_error, read_history, read_error_context
 from .models import KIND, STATUS, TagEdit, TextFilter, TextModel, tr
 from .settings import SettingsDialog
 
@@ -177,6 +177,7 @@ class MainWindow(QMainWindow):
         self.activity = QPlainTextEdit(readOnly=True)
         self.activity.document().setMaximumBlockCount(2000)
         dock = QDockWidget(tr("工作紀錄（與命令視窗同步）"), self)
+        self.activity_dock = dock
         panel = QWidget()
         layout = QVBoxLayout(panel)
         controls = QHBoxLayout()
@@ -234,6 +235,14 @@ class MainWindow(QMainWindow):
 
         right = QWidget()
         rv = QVBoxLayout(right)
+        self.crash_notice = QWidget()
+        notice = QHBoxLayout(self.crash_notice)
+        self.crash_label = QLabel(wordWrap=True)
+        notice.addWidget(self.crash_label, 1)
+        notice.addWidget(QPushButton(tr("查看錯誤與前後文"), clicked=self.view_previous_crash))
+        notice.addWidget(QPushButton(tr("關閉提示"), clicked=self.crash_notice.hide))
+        self.crash_notice.hide()
+        rv.addWidget(self.crash_notice)
         self.title = QLabel(tr("請從左側選擇或加入遊戲"))
         self.title.setStyleSheet("font-size: 16pt; font-weight: 600")
         rv.addWidget(self.title)
@@ -574,6 +583,49 @@ class MainWindow(QMainWindow):
         self.log_choice.setCurrentIndex(max(0, index))
         self.log_choice.blockSignals(False)
         self._select_log()
+
+    def show_previous_crash(self, path):
+        self.previous_crash = path
+        self.crash_label.setText(tr("上次未正常結束（也可能是強制關閉或斷電）。已保留紀錄：{}").format(path.name))
+        self.crash_notice.show()
+
+    def view_previous_crash(self):
+        path = self.previous_crash
+        self._log_timer.stop()
+        for control in (self.log_choice, self.log_search, self.activity_errors):
+            control.blockSignals(True)
+        index = self.log_choice.findData(str(path))
+        if index < 0:
+            self.log_choice.addItem(path.name, str(path))
+            index = self.log_choice.count() - 1
+        self.log_choice.setCurrentIndex(index)
+        self.log_search.clear()
+        self.activity_errors.setChecked(False)
+        for control in (self.log_choice, self.log_search, self.activity_errors):
+            control.blockSignals(False)
+        self._log_request += 1
+        request = self._log_request
+        self.log_views.setCurrentIndex(1)
+        self.activity_dock.show()
+        self.history_log.clear()
+        self.activity_path.setText(tr("讀取異常前後文：{}").format(path))
+
+        def done(job):
+            if request != self._log_request:
+                return
+            if job.error:
+                self.activity_path.setText(tr("讀取失敗：{}").format(job.error))
+                return
+            text, target, line = job.result
+            self.history_log.setPlainText(text)
+            cursor = QTextCursor(self.history_log.document().findBlockByNumber(target if line else 0))
+            cursor.select(QTextCursor.LineUnderCursor)
+            self.history_log.setTextCursor(cursor)
+            self.history_log.ensureCursorVisible()
+            detail = tr("最後錯誤第 {} 行（前後各最多 20 行）").format(line) if line else tr("未找到錯誤關鍵字，顯示結尾紀錄")
+            self.activity_path.setText(f"{path} — {detail}")
+
+        self.run_bg(lambda job: read_error_context(path), done, tr("查看上次異常"), key="log-history")
 
     def _select_log(self):
         self._log_request += 1

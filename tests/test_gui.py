@@ -286,6 +286,23 @@ class Gui(unittest.TestCase):
         win.log_choice.setCurrentIndex(0)
         self.assertIn("live output", win.activity.toPlainText())
 
+    def test_previous_crash_jump_clears_filters_and_selects_error(self):
+        win = self.win
+        self.home.mkdir(parents=True, exist_ok=True)
+        path = self.home / "gui-crash.log"
+        path.write_text("before\nERROR crash\nafter\n", encoding="utf8")
+        win.show_previous_crash(path)
+        self.assertFalse(win.crash_notice.isHidden())
+        win.log_search.setText("missing")
+        win.activity_errors.setChecked(True)
+        win.view_previous_crash()
+        self.idle()
+        self.assertEqual(win.history_log.textCursor().selectedText(), "ERROR crash")
+        self.assertIn("before", win.history_log.toPlainText())
+        self.assertIn("after", win.history_log.toPlainText())
+        self.assertFalse(win.activity_errors.isChecked())
+        self.assertFalse(win.activity_dock.isHidden())
+
     def test_preview_and_apply_are_serialized_for_same_game(self):
         from yakupatch.writeback import ApplyPlan
         win=self.win;entered=threading.Event();release=threading.Event();written=threading.Event()

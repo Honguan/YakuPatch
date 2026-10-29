@@ -2,6 +2,29 @@ import json,os,subprocess,sys,unittest
 
 
 class Console(unittest.TestCase):
+    def test_abnormal_session_detection_excludes_live_and_normal_sessions(self):
+        from pathlib import Path
+        from yakupatch.gui.console import previous_abnormal
+        folder = Path(os.environ['YAKUPATCH_HOME']) / 'logs'
+        script = "from yakupatch.gui.console import ConsoleCapture,previous_abnormal; c=ConsoleCapture(); assert previous_abnormal(c.log_path.parent) is None; c.close(normal=True)"
+        subprocess.run([sys.executable, '-X', 'utf8', '-c', script], check=True, capture_output=True, timeout=15)
+        self.assertIsNone(previous_abnormal(folder))
+        script = "import os; from yakupatch.gui.console import ConsoleCapture; c=ConsoleCapture(); os._exit(17)"
+        result = subprocess.run([sys.executable, '-X', 'utf8', '-c', script], capture_output=True, timeout=15)
+        self.assertEqual(result.returncode, 17)
+        self.assertIsNotNone(previous_abnormal(folder))
+
+    def test_crash_context_finds_error_before_large_normal_tail(self):
+        from pathlib import Path
+        from yakupatch.gui.console import read_error_context
+        path = Path(os.environ['YAKUPATCH_HOME']) / 'context.log'
+        path.write_text('before\nERROR crash here\nafter\n' + 'normal\n' * 3000, encoding='utf8')
+        text, target, line = read_error_context(path)
+        self.assertEqual(line, 2)
+        self.assertEqual(text.splitlines()[target], 'ERROR crash here')
+        self.assertIn('before\n', text)
+        self.assertIn('\nafter', text)
+
     def setUp(self):
         import tempfile
         from unittest.mock import patch

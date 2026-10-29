@@ -10,6 +10,46 @@ from datetime import datetime
 from collections import deque
 
 
+def _session_lock(file, acquire):
+    file.seek(0)
+    if os.name == "nt":
+        import msvcrt
+        msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK if acquire else msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB if acquire else fcntl.LOCK_UN)
+
+
+def previous_abnormal(folder):
+    for path in sorted(folder.glob("gui-*.session"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            with path.open("r+b") as file:
+                _session_lock(file, True)  # A live instance holds this lock; never report it as crashed.
+                state = file.read(1)
+                _session_lock(file, False)
+        except OSError:
+            continue
+        log = path.with_suffix(".log")
+        return log if state in (b"R", b"E") and log.exists() else None
+    return None
+
+
+def read_error_context(path):
+    before = deque(maxlen=20)
+    context, target, error_line, after = [], 0, 0, 0
+    with path.open(encoding="utf-8", errors="replace") as source:
+        for number, line in enumerate(source, 1):
+            line = line[:4000].rstrip("\r\n")
+            if is_error(line):
+                context = list(before) + [line]
+                target, error_line, after = len(before), number, 20
+            elif after:
+                context.append(line)
+                after -= 1
+            before.append(line)
+    return "\n".join(context or before), target, error_line
+
+
 def is_error(text):
     return any(word in text.lower() for word in
                ("error", "exception", "traceback", "fatal", "failed", "錯誤", "失敗", "異常",
@@ -36,8 +76,13 @@ class ConsoleCapture:
         from ..extract import projects_home
         folder = projects_home().parent / "logs"
         folder.mkdir(parents=True, exist_ok=True)
+        self.previous_log = previous_abnormal(folder)
         self.log_path = folder / f"gui-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}.log"
         self.log = self.log_path.open("xb", buffering=0)
+        self.session = self.log_path.with_suffix(".session").open("x+b", buffering=0)
+        self.session.write(b"R")
+        _session_lock(self.session, True)
+        os.fsync(self.session.fileno())
         self.pending = deque(maxlen=256)
         self.lock = threading.Lock()
         self.dropped = 0
@@ -126,7 +171,7 @@ class ConsoleCapture:
                 raise OSError(f"紀錄不完整：{self.log_error}")
             shutil.copyfile(self.log_path, path)
 
-    def close(self):
+    def close(self, normal=False):
         if self.closed:
             return
         self.closed = True
@@ -142,3 +187,8 @@ class ConsoleCapture:
             thread.join(timeout=2)
         if not any(thread.is_alive() for *_, thread in self.streams):
             self.log.close()
+        self.session.seek(0)
+        self.session.write(b"N" if normal and not getattr(self, "log_error", None) else b"E")
+        os.fsync(self.session.fileno())
+        _session_lock(self.session, False)
+        self.session.close()
