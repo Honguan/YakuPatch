@@ -1,18 +1,19 @@
 """Main window (§11.2): library on the left, five-step bar, tabs, job queue at the bottom.
 
 Long work runs on core.JobQueue threads; results and Store changes come back through Qt signals."""
+import shutil
 import threading
 import time
 import urllib.request
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QKeySequence, QShortcut
-from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QGridLayout,
+from PySide6.QtGui import QAction, QColor, QKeySequence, QShortcut, QTextCursor
+from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDialog, QDockWidget, QFileDialog, QFormLayout, QGridLayout,
                                QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem,
                                QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QRadioButton, QSizePolicy,
-                               QSpinBox, QSplitter, QTableView, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
+                               QSpinBox, QSplitter, QStackedWidget, QTableView, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
                                QWidget)
 
 from .. import core, sakura_kit
@@ -22,6 +23,7 @@ from ..backends.openai_compat import OpenAICompat
 from ..backends.sakura import Sakura
 from ..cli import _LANG, _REASON
 from ..extract import LanguageGateStop
+from .console import is_error, read_history, read_error_context
 from .models import KIND, STATUS, TagEdit, TextFilter, TextModel, tr
 from .settings import SettingsDialog
 
@@ -106,6 +108,7 @@ class MainWindow(QMainWindow):
         self.games: dict[str, tuple] = {}         # key -> (game, plugin, store), one Store per game (single writer)
         self.callbacks: dict = {}
         self.jobs: list = []
+        self._job_serial = 0
         self.translation = None                   # (job, key) of the job shown on the translate tab
         self.key = None
         self.plan = None
@@ -113,7 +116,8 @@ class MainWindow(QMainWindow):
         self.rows: dict[str, dict] = {}            # key -> library row as last shown
         self.batch_job = None
         self.batch_index = None
-        self._dirty = QTimer(self, singleShot=True, interval=300, timeout=self._refresh_counts)
+        self._dirty = QTimer(self, singleShot=True, interval=200,
+                             timeout=lambda: self._refresh_counts(history=False))
         self._build()
         self.refresh_library()
 
@@ -147,27 +151,76 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(label)
 
     # ---------- layout ----------
+    def _menu_button(self, title, actions):
+        button = QPushButton(tr(title))
+        menu = QMenu(button)
+        for text, slot in actions:
+            menu.addAction(tr(text), slot)
+        button.setMenu(menu)
+        return button
+
     def _build(self):
         bar = self.addToolBar(tr("主要"))
         bar.setMovable(False)
-        for text, slot in ((tr("＋加入遊戲"), self.add_game), (tr("掃描資料夾"), lambda: self.scan_folder()),
-                           (tr("重新掃描"), self.rescan), (tr("掃描資料夾清單"), self.manage_folders)):
-            bar.addAction(QAction(text, self, triggered=slot))
+        bar.addAction(QAction(tr("＋加入遊戲"), self, triggered=self.add_game))
+        bar.addWidget(self._menu_button("遊戲庫管理", (
+            ("掃描資料夾", lambda: self.scan_folder()), ("重新掃描", self.rescan),
+            ("掃描資料夾清單", self.manage_folders),
+            ("移除不需翻譯", lambda: self.remove_where(lambda r: r["no_need"], tr("不需翻譯"))),
+            ("移除不支援", lambda: self.remove_where(lambda r: r["status"] == tr("不支援"), tr("不支援"))))))
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         bar.addWidget(spacer)
         self.backend_label = QLabel(tr("後端：未連線"))
         bar.addWidget(self.backend_label)
         bar.addAction(QAction(tr("設定"), self, triggered=lambda: self.open_settings()))
+        self.activity = QPlainTextEdit(readOnly=True)
+        self.activity.document().setMaximumBlockCount(2000)
+        dock = QDockWidget(tr("工作紀錄（與命令視窗同步）"), self)
+        self.activity_dock = dock
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        controls = QHBoxLayout()
+        self.activity_errors = QCheckBox(tr("只看錯誤"))
+        self.activity_errors.toggled.connect(self._filter_activity)
+        self.log_choice = QComboBox()
+        self.log_choice.addItem(tr("即時紀錄"), None)
+        self.log_choice.currentIndexChanged.connect(self._select_log)
+        controls.addWidget(self.log_choice)
+        controls.addWidget(QPushButton(tr("重新整理"), clicked=self.refresh_logs))
+        self.log_search = QLineEdit(placeholderText=tr("搜尋紀錄（不分大小寫）"))
+        self._log_request = 0
+        self._log_timer = QTimer(self, singleShot=True, interval=200, timeout=self._select_log)
+        self.log_search.textChanged.connect(lambda: self._log_timer.start())
+        controls.addWidget(self.log_search, 1)
+        controls.addWidget(self.activity_errors)
+        controls.addStretch()
+        controls.addWidget(QPushButton(tr("匯出完整紀錄"), clicked=self.export_activity))
+        layout.addLayout(controls)
+        self.activity_path = QLabel(textInteractionFlags=Qt.TextSelectableByMouse, wordWrap=True)
+        layout.addWidget(self.activity_path)
+        self.history_log = QPlainTextEdit(readOnly=True)
+        self.history_log.document().setMaximumBlockCount(2000)
+        self.log_views = QStackedWidget()
+        self.log_views.addWidget(self.activity)
+        self.log_views.addWidget(self.history_log)
+        layout.addWidget(self.log_views)
+        dock.setWidget(panel)
+        self.addDockWidget(Qt.BottomDockWidgetArea, dock)
+        dock.hide()
+        action = dock.toggleViewAction()
+        action.setText(tr("工作紀錄"))
+        bar.addAction(action)
 
         left = QWidget()
         lv = QVBoxLayout(left)
         self.search = QLineEdit(placeholderText=tr("搜尋遊戲"))
-        self.search.textChanged.connect(self.refresh_library)
+        self.search.textChanged.connect(lambda: self.refresh_library(reload=False))
         self.lib_filter = QComboBox()
         self.lib_filter.addItems([tr(s) for s in ("全部", "未處理", "翻譯中", "已提取", "已寫回", "不需翻譯", "不支援")])
-        self.lib_filter.currentIndexChanged.connect(self.refresh_library)
+        self.lib_filter.currentIndexChanged.connect(lambda: self.refresh_library(reload=False))
         self.lib_list = QListWidget()
+        self.lib_list.setUniformItemSizes(True)
         self.lib_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.lib_list.currentItemChanged.connect(lambda item, _: item and self.select_game(item.data(Qt.UserRole)))
         self.lib_list.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -175,27 +228,30 @@ class MainWindow(QMainWindow):
         for w in (QLabel(tr("遊戲庫（可按 Ctrl／Shift 多選）")), self.search, self.lib_filter, self.lib_list):
             lv.addWidget(w)
         buttons = QGridLayout()
-        for n, (text, slot) in enumerate((
-                (tr("移除不需翻譯"), lambda: self.remove_where(lambda r: r["no_need"], tr("不需翻譯"))),
-                (tr("移除不支援"), lambda: self.remove_where(lambda r: r["status"] == tr("不支援"), tr("不支援"))))):
-            buttons.addWidget(QPushButton(text, clicked=slot), n // 2, n % 2)
-        self.batch_apply = QCheckBox(tr("完成後寫回遊戲"))
-        buttons.addWidget(QPushButton(tr("批次翻譯選取遊戲"), clicked=self.batch_translate), 1, 0)
-        buttons.addWidget(self.batch_apply, 1, 1)
+        self.batch_apply = QCheckBox(tr("批次翻譯完成後寫回"))
+        buttons.addWidget(QPushButton(tr("批次翻譯選取遊戲"), clicked=self.batch_translate), 0, 0)
+        buttons.addWidget(self.batch_apply, 1, 0)
         lv.addLayout(buttons)
 
         right = QWidget()
         rv = QVBoxLayout(right)
+        self.crash_notice = QWidget()
+        notice = QHBoxLayout(self.crash_notice)
+        self.crash_label = QLabel(wordWrap=True)
+        notice.addWidget(self.crash_label, 1)
+        notice.addWidget(QPushButton(tr("查看錯誤與前後文"), clicked=self.view_previous_crash))
+        notice.addWidget(QPushButton(tr("關閉提示"), clicked=self.crash_notice.hide))
+        self.crash_notice.hide()
+        rv.addWidget(self.crash_notice)
         self.title = QLabel(tr("請從左側選擇或加入遊戲"))
         self.title.setStyleSheet("font-size: 16pt; font-weight: 600")
         rv.addWidget(self.title)
         steps = QHBoxLayout()
-        self.step_buttons = []
+        self.step_labels = []
         for i, name in enumerate(STEPS):
-            b = QPushButton(tr(name), flat=True)
-            b.clicked.connect(lambda _=False, i=i: self.tabs.setCurrentIndex([0, 0, 0, 3, 4][i]))
+            b = QLabel(tr(name), alignment=Qt.AlignCenter)
             steps.addWidget(b)
-            self.step_buttons.append(b)
+            self.step_labels.append(b)
         rv.addLayout(steps)
         self.tabs = QTabWidget()
         for widget, name in ((self._overview(), "總覽"), (self._text(), "文本"), (self._glossary(), "術語"),
@@ -214,14 +270,18 @@ class MainWindow(QMainWindow):
         jobs = QHBoxLayout()
         self.job_label = QLabel(tr("工作佇列：沒有工作"))
         self.job_pause = QPushButton(tr("暫停"), clicked=self.pause_job)
+        self.resume_button = QPushButton(tr("繼續"), clicked=self.resume_job)
         self.job_cancel = QPushButton(tr("取消"), clicked=self.cancel_job)
         self.job_bar = QProgressBar(maximumWidth=240, visible=False)
         jobs.addWidget(self.job_label, 1)
         jobs.addWidget(self.job_bar)
         jobs.addWidget(self.job_pause)
+        jobs.addWidget(self.resume_button)
         jobs.addWidget(self.job_cancel)
         cv.addLayout(jobs)
         self.setCentralWidget(central)
+        self.scope.idToggled.connect(lambda *_: self._translation_buttons())
+        self.table.selectionModel().selectionChanged.connect(lambda *_: self._translation_buttons())
         self._translation_buttons()
         QShortcut(QKeySequence("Ctrl+F"), self, activated=lambda: (self.tabs.setCurrentIndex(1), self.query.setFocus()))
 
@@ -251,7 +311,7 @@ class MainWindow(QMainWindow):
         for k, name in KIND.items():
             self.f_kind.addItem(tr(name), k)
         self.f_flag.addItem(tr("旗標：全部"), "")
-        for k, name in (("failed", "失敗"), ("long", "超長"), ("uncertain", "不確定"), ("inconsistent", "不一致")):
+        for k, name in (("long", "超長"), ("uncertain", "不確定"), ("inconsistent", "不一致")):
             self.f_flag.addItem(tr(name), k)
         self.query = QLineEdit(placeholderText=tr("搜尋原文或譯文"))
         self.count_label = QLabel()
@@ -288,16 +348,15 @@ class MainWindow(QMainWindow):
         self.refs_label = QLabel(wordWrap=True)
         buttons = QHBoxLayout()
         for text, slot, key in ((tr("儲存並下一句"), self.save_edit, "Ctrl+Return"),
-                                (tr("重翻此句"), self.retranslate_current, "F5"),
-                                (tr("標為已審閱"), self.mark_reviewed, None),
-                                (tr("套用到相同原文"), self.apply_same, None),
-                                (tr("重翻選取"), self.retranslate_selected, None),
-                                (tr("全文 QA"), self.run_qa, None)):
+                                (tr("重翻選取"), self.retranslate_selected, "F5"),
+                                (tr("標為已審閱"), self.mark_reviewed, None)):
             b = QPushButton(text, clicked=slot)
             if key:
                 b.setShortcut(QKeySequence(key))
                 b.setToolTip(key)
             buttons.addWidget(b)
+        buttons.addWidget(self._menu_button("更多文本操作", (
+            ("套用到相同原文", self.apply_same), ("全文 QA", self.run_qa))))
         g.addWidget(QLabel(tr("原文")), 0, 0)
         g.addWidget(self.src_label, 0, 1)
         g.addWidget(QLabel(tr("上下文")), 1, 0)
@@ -323,9 +382,10 @@ class MainWindow(QMainWindow):
             row.addWidget(QPushButton(text, clicked=slot))
         v.addLayout(row)
         row = QHBoxLayout()
-        for text, slot in ((tr("查字典"), self.gloss_lookup), (tr("VNDB 角色名單"), self.gloss_vndb),
-                           (tr("Wikidata 查譯名"), self.gloss_wikidata), (tr("字典設定"), lambda: self.open_settings(5))):
-            row.addWidget(QPushButton(text, clicked=slot))
+        row.addWidget(self._menu_button("查詢譯名", (
+            ("查字典", self.gloss_lookup), ("VNDB 角色名單", self.gloss_vndb),
+            ("Wikidata 查譯名", self.gloss_wikidata))))
+        row.addStretch()
         v.addLayout(row)
         v.addWidget(QLabel(tr("字典譯名只是候選（來源 dict:…），勾選「已確認」後才會要求翻譯使用。")))
         v.addWidget(QLabel(tr("翻譯進行中術語表為唯讀。")))
@@ -367,11 +427,7 @@ class MainWindow(QMainWindow):
         v.addLayout(form)
         ctl = QHBoxLayout()
         self.start_button = QPushButton(tr("開始翻譯"), clicked=lambda: self.start_translation())
-        self.pause_button = QPushButton(tr("暫停"), clicked=self.pause_job)
-        self.resume_button = QPushButton(tr("繼續"), clicked=self.resume_job)
-        self.cancel_button = QPushButton(tr("取消"), clicked=self.cancel_job)
-        for b in (self.start_button, self.pause_button, self.resume_button, self.cancel_button):
-            ctl.addWidget(b)
+        ctl.addWidget(self.start_button)
         v.addLayout(ctl)
         self.stages = StageBars()
         self.progress_label = QLabel()
@@ -394,9 +450,11 @@ class MainWindow(QMainWindow):
         self.history.setEditTriggers(QAbstractItemView.NoEditTriggers)
         v.addWidget(self.history)
         row = QHBoxLayout()
-        for text, slot in ((tr("撤銷此次翻譯"), self.undo_run), (tr("匯出分批檔"), self.export_batches),
-                           (tr("匯入譯文"), self.import_batches), (tr("匯出分享檔"), self.export_share)):
-            row.addWidget(QPushButton(text, clicked=slot))
+        row.addWidget(self._menu_button("翻譯紀錄操作", (("撤銷此次翻譯", self.undo_run),)))
+        row.addWidget(self._menu_button("匯入／匯出", (
+            ("匯出分批檔", self.export_batches), ("匯入譯文", self.import_batches),
+            ("匯出分享檔", self.export_share))))
+        row.addStretch()
         v.addLayout(row)
         self._backend_note()
         return w
@@ -407,9 +465,10 @@ class MainWindow(QMainWindow):
         row = QHBoxLayout()
         self.preview_button = QPushButton(tr("寫回前預覽"), clicked=self.preview)
         self.apply_button = QPushButton(tr("寫回遊戲"), clicked=self.apply, enabled=False)
-        for b in (self.preview_button, self.apply_button, QPushButton(tr("還原遊戲"), clicked=self.restore),
-                  QPushButton(tr("啟動遊戲"), clicked=self.launch)):
+        for b in (self.preview_button, self.apply_button):
             row.addWidget(b)
+        row.addWidget(self._menu_button("遊戲操作", (
+            ("還原遊戲", self.restore), ("啟動遊戲", self.launch))))
         v.addLayout(row)
         self.wb_table = QTableWidget(0, 4)
         self.wb_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -423,12 +482,26 @@ class MainWindow(QMainWindow):
     def run_bg(self, fn, done, label, key=None):
         """`fn(job)` runs on a worker thread; `done(job)` runs on the GUI thread when it ends."""
         job = self.queue.submit(key, fn, label)
+        self._job_serial += 1
+        job.gui_number = self._job_serial
         self.callbacks[job] = done
         self.jobs.append(job)
         self._job_changed(job)
         return job
 
     def _job_changed(self, job):
+        if getattr(job, "gui_number", None) is not None and getattr(job, "gui_state", None) != job.state:
+            job.gui_state = job.state
+            state = {"queued": "排隊中", "running": "進行中", "done": "完成", "failed": "失敗",
+                     "paused": "已暫停", "cancelled": "已取消"}.get(job.state, job.state)
+            message = f"[{time.strftime('%H:%M:%S')}] #{getattr(job, 'gui_number', '—')} {job.label}：{tr(state)}"
+            if getattr(job, "error", None):
+                message += f" — {job.error}"
+            if not getattr(self, "console_capture", False):
+                self.activity.appendPlainText(message)
+                if self.log_choice.currentData() is None:
+                    self._filter_activity()
+            print(message, flush=True)
         if job.state in ("done", "failed", "paused", "cancelled") and job in self.callbacks:
             self.callbacks.pop(job)(job)
         live = [j for j in self.jobs if j.state in ("queued", "running")]
@@ -448,6 +521,14 @@ class MainWindow(QMainWindow):
         if job is self.batch_job:
             self._show_batch(job)
         self._translation_buttons()
+        if self.key:
+            busy = any(j.key == ("game", str(self.current[0].resolve())) for j in live)
+            if busy:
+                self.preview_button.setEnabled(False)
+                self.apply_button.setEnabled(False)
+            else:
+                self.preview_button.setEnabled(not self.rows.get(self.key, {}).get("no_need", False))
+                self.apply_button.setEnabled(bool(self.plan and self.plan.files))
 
     @staticmethod
     def _job_text(j) -> str:
@@ -467,6 +548,155 @@ class MainWindow(QMainWindow):
         elif not p:
             bits.append(tr("進行中"))
         return " · ".join(bits)
+
+    def console_output(self, text):
+        if not text:
+            return
+        bar = self.activity.verticalScrollBar()
+        follow = bar.value() == bar.maximum()
+        cursor = QTextCursor(self.activity.document())
+        cursor.movePosition(QTextCursor.End)
+        cursor.insertText(text)
+        excess = self.activity.document().characterCount() - 200000
+        if excess > 0:
+            cursor.movePosition(QTextCursor.Start)
+            cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, excess)
+            cursor.removeSelectedText()
+        if follow:
+            bar.setValue(bar.maximum())
+        if self.log_choice.currentData() is None and (self.activity_errors.isChecked() or self.log_search.text()):
+            self._filter_activity()
+
+    def refresh_logs(self):
+        capture = getattr(self, "capture", None)
+        if capture is None:
+            return
+        selected = self.log_choice.currentData()
+        self.log_choice.blockSignals(True)
+        self.log_choice.clear()
+        self.log_choice.addItem(tr("即時紀錄"), None)
+        for path in sorted(capture.log_path.parent.glob("gui*.log"), key=lambda p: p.stat().st_mtime, reverse=True):
+            if path != capture.log_path:
+                label = tr("上次紀錄 · {}").format(path.name) if self.log_choice.count() == 1 else path.name
+                self.log_choice.addItem(label, str(path))
+        index = self.log_choice.findData(selected)
+        self.log_choice.setCurrentIndex(max(0, index))
+        self.log_choice.blockSignals(False)
+        self._select_log()
+
+    def show_previous_crash(self, path):
+        self.previous_crash = path
+        self.crash_label.setText(tr("上次未正常結束（也可能是強制關閉或斷電）。已保留紀錄：{}").format(path.name))
+        self.crash_notice.show()
+
+    def view_previous_crash(self):
+        path = self.previous_crash
+        self._log_timer.stop()
+        for control in (self.log_choice, self.log_search, self.activity_errors):
+            control.blockSignals(True)
+        index = self.log_choice.findData(str(path))
+        if index < 0:
+            self.log_choice.addItem(path.name, str(path))
+            index = self.log_choice.count() - 1
+        self.log_choice.setCurrentIndex(index)
+        self.log_search.clear()
+        self.activity_errors.setChecked(False)
+        for control in (self.log_choice, self.log_search, self.activity_errors):
+            control.blockSignals(False)
+        self._log_request += 1
+        request = self._log_request
+        self.log_views.setCurrentIndex(1)
+        self.activity_dock.show()
+        self.history_log.clear()
+        self.activity_path.setText(tr("讀取異常前後文：{}").format(path))
+
+        def done(job):
+            if request != self._log_request:
+                return
+            if job.error:
+                self.activity_path.setText(tr("讀取失敗：{}").format(job.error))
+                return
+            text, target, line = job.result
+            self.history_log.setPlainText(text)
+            cursor = QTextCursor(self.history_log.document().findBlockByNumber(target if line else 0))
+            cursor.select(QTextCursor.LineUnderCursor)
+            self.history_log.setTextCursor(cursor)
+            self.history_log.ensureCursorVisible()
+            detail = tr("最後錯誤第 {} 行（前後各最多 20 行）").format(line) if line else tr("未找到錯誤關鍵字，顯示結尾紀錄")
+            self.activity_path.setText(f"{path} — {detail}")
+
+        self.run_bg(lambda job: read_error_context(path), done, tr("查看上次異常"), key="log-history")
+
+    def _select_log(self):
+        self._log_request += 1
+        request = self._log_request
+        path = self.log_choice.currentData()
+        if path is None:
+            self.log_views.setCurrentIndex(0)
+            capture = getattr(self, "capture", None)
+            self.activity_path.setText(str(capture.log_path) if capture else "")
+            self._filter_activity()
+            return
+        path = Path(path)
+        self.log_views.setCurrentIndex(1)
+        self.history_log.clear()
+        self.activity_path.setText(tr("讀取中：{}").format(path))
+        query, errors = self.log_search.text(), self.activity_errors.isChecked()
+
+        def done(job):
+            if request != self._log_request:
+                return
+            if job.error:
+                self.activity_path.setText(tr("讀取失敗：{}").format(job.error))
+                return
+            text, count = job.result
+            self.history_log.setPlainText(text)
+            self.history_log.moveCursor(QTextCursor.End)
+            self.activity_path.setText(tr("{} — 符合 {} 行；顯示最後 2,000 行／200,000 字元").format(path, count))
+
+        self.run_bg(lambda job: read_history(path, query, errors) if request == self._log_request else None,
+                    done, tr("讀取歷史紀錄"), key="log-history")
+
+    def _filter_activity(self):
+        if self.log_choice.currentData() is not None:
+            self._select_log()
+            return
+        only_errors = self.activity_errors.isChecked()
+        query = self.log_search.text().lower()
+        document = self.activity.document()
+        block = document.begin()
+        while block.isValid():
+            text = block.text().lower()
+            block.setVisible(query in text and (not only_errors or is_error(text)))
+            block = block.next()
+        document.markContentsDirty(0, document.characterCount())
+        self.activity.viewport().update()
+
+    def export_activity(self):
+        capture = getattr(self, "capture", None)
+        if capture is None:
+            QMessageBox.information(self, "YakuPatch", tr("尚無自動儲存紀錄"))
+            return
+        source = Path(self.log_choice.currentData()) if self.log_choice.currentData() else capture.log_path
+        filename, _ = QFileDialog.getSaveFileName(self, tr("匯出完整工作紀錄"),
+                                                 str(Path.home() / source.name), "Log (*.log)")
+        if not filename:
+            return
+
+        def done(job):
+            if not self._error(job, tr("匯出紀錄失敗")):
+                self.statusBar().showMessage(tr("紀錄已匯出：{}").format(filename), 10000)
+
+        def export(job):
+            target = Path(filename)
+            if source.resolve() == target.resolve():
+                raise ValueError("請選擇不同的匯出路徑")
+            if source == capture.log_path:
+                capture.export(target)
+            else:
+                shutil.copyfile(source, target)
+
+        self.run_bg(export, done, tr("匯出工作紀錄"))
 
     def _error(self, job, what) -> bool:
         if job.error is None:
@@ -544,14 +774,19 @@ class MainWindow(QMainWindow):
             self.tabs.setEnabled(False)
         self.refresh_library()
 
-    def refresh_library(self):
-        # shortcut: rows are rebuilt from disk on each refresh; cache counts in library.json for very large libraries.
+    def _row(self, key):
+        opened = self.games.get(key)
+        return self.lib.row(key, self.home, store=opened[2] if opened else None)
+
+    def refresh_library(self, reload=True):
+        if not reload:
+            self._filter_library()
+            return
         current = self.key
-        q, wanted = self.search.text().strip().lower(), self.lib_filter.currentText()
         rows = []
         for key in self.lib.games:
             try:
-                row = self.lib.row(key, self.home)
+                row = self._row(key)
             except (OSError, ValueError, StopIteration) as ex:
                 row = {"key": key, "name": Path(key).name, "engine": "?", "lang": "", "status": tr("不支援"),
                        "progress": 0, "no_need": False, "reason": str(ex)}
@@ -563,8 +798,6 @@ class MainWindow(QMainWindow):
         self.lib_list.blockSignals(True)
         self.lib_list.clear()
         for r in rows:
-            if q and q not in r["name"].lower() or wanted != tr("全部") and r["status"] != wanted:
-                continue
             label = r["status"] if r["no_need"] or r["status"] == "不支援" else f"{r['status']} {r['progress']}%"
             item = QListWidgetItem(f"{r['name']}\n  {r['engine']}  [{r['lang'] or '—'}]  {label}")
             item.setData(Qt.UserRole, r["key"])
@@ -576,6 +809,27 @@ class MainWindow(QMainWindow):
             if r["key"] == current:
                 self.lib_list.setCurrentItem(item)
         self.lib_list.blockSignals(False)
+        self._filter_library()
+
+    def _filter_library(self):
+        q, wanted = self.search.text().strip().lower(), self.lib_filter.currentText()
+        self.lib_list.setUpdatesEnabled(False)
+        self.lib_list.blockSignals(True)
+        try:
+            for i in range(self.lib_list.count()):
+                item = self.lib_list.item(i)
+                row = self.rows[item.data(Qt.UserRole)]
+                hidden = bool(q and q not in row["name"].lower() or
+                              wanted != tr("全部") and row["status"] != wanted)
+                if item.isHidden() != hidden:
+                    item.setHidden(hidden)
+                if hidden:
+                    item.setSelected(False)
+                    if item is self.lib_list.currentItem():
+                        self.lib_list.setCurrentItem(None)
+        finally:
+            self.lib_list.blockSignals(False)
+            self.lib_list.setUpdatesEnabled(True)
 
     def _library_menu(self, pos):
         item = self.lib_list.itemAt(pos)
@@ -611,7 +865,7 @@ class MainWindow(QMainWindow):
         if not keys:
             QMessageBox.information(self, "YakuPatch", tr("請先在左側選取要翻譯的遊戲（可按 Ctrl／Shift 多選）"))
             return
-        keys = [k for k in keys if not self.lib.row(k, self.home)["no_need"]]
+        keys = [k for k in keys if not self._row(k)["no_need"]]
         if not keys:
             QMessageBox.information(self, "YakuPatch", tr("選取的遊戲不需翻譯，可在遊戲內切換中文"))
             return
@@ -748,16 +1002,20 @@ class MainWindow(QMainWindow):
     def _store_changed(self, key, ids):
         if key == self.key:
             self.model.changed(ids)
-            self._dirty.start()
+            if not self._dirty.isActive():
+                self._dirty.start()
 
     # ---------- overview & steps ----------
-    def _refresh_counts(self):
+    def _refresh_counts(self, history=True):
         if not self.key:
             return
         game, plugin, store = self.current
         c = core.counts(store)
         entry = self.lib.games.get(self.key, {})
-        row = self.lib.row(self.key, self.home)
+        row = self._row(self.key)
+        if self.translation and self.translation[1] == self.key and self.translation[0].state in ("queued", "running"):
+            row["status"] = tr("翻譯中")
+        self.rows[self.key] = row
         probe = store.manifest.get("language_probe") or entry.get("probe") or {}
         extracted, applied = bool(store.manifest), bool(core.Backup(game).files)
         todo = c["translated"] + c["reviewed"] + c["pending"] + c["failed"]
@@ -767,7 +1025,7 @@ class MainWindow(QMainWindow):
         self.title.setText(f"{game.name if game.name.lower() != 'www' else game.parent.name}    "
                            f"{plugin.name}  [{row['lang']}]")
         marks = [True, bool(probe), extracted, extracted and c["pending"] + c["failed"] == 0 and todo > 0, applied]
-        for b, name, ok, i in zip(self.step_buttons, STEPS, marks, range(5)):
+        for b, name, ok, i in zip(self.step_labels, STEPS, marks, range(5)):
             b.setText(tr(name) + (" ✓" if ok else f" {pct}%" if i == 3 and extracted else ""))
         self.info.setText(tr("路徑：{}\n引擎：{}（偵測分數 {:.2f}）\n文本檔：{} 個\n句數：共 {}，待翻 {}，已翻 {}，"
                              "已審閱 {}，失敗 {}，不翻 {}，不確定 {}").format(
@@ -793,32 +1051,37 @@ class MainWindow(QMainWindow):
         if row["no_need"]:
             self.lang_card.setText(tr("不需翻譯：{}\n請在遊戲設定切換中文。").format(row["reason"]))
         self.force_button.setVisible(False)
-        self.primary.setText(tr("開始提取") if not extracted else tr("開始翻譯") if c["pending"] + c["failed"] else
-                             tr("寫回遊戲") if not applied else tr("啟動遊戲"))
+        self.primary.setText(tr("開始提取") if not extracted else tr("前往翻譯") if c["pending"] + c["failed"] else
+                             tr("預覽寫回") if not applied else tr("啟動遊戲"))
         if zh:
             self.primary.setText(tr("啟動遊戲"))
         self.count_label.setText(tr("{} 句").format(self.proxy.rowCount()))
-        self.load_history()
+        if history:
+            self.load_history()
+        self._translation_buttons()
 
     def primary_action(self):
         text = self.primary.text()
         if text == tr("開始提取"):
             self.extract()
-        elif text == tr("開始翻譯"):
+        elif text == tr("前往翻譯"):
             self.tabs.setCurrentIndex(3)
-        elif text == tr("寫回遊戲"):
+        elif text == tr("預覽寫回"):
             self.tabs.setCurrentIndex(4)
             self.preview()
         else:
             self.launch()
 
     def extract(self, force=False):
-        if self.lib.row(self.key, self.home)["no_need"]:
+        if self._row(self.key)["no_need"]:
             QMessageBox.information(self, "YakuPatch", tr("遊戲內已有中文，不需翻譯"))
             return
         game, plugin, store = self.current
+        key = self.key
 
         def done(job):
+            if self.key != key:
+                return
             if isinstance(job.error, LanguageGateStop):
                 self.lib.games.setdefault(self.key, {})["probe"] = job.error.probe
                 packs = "\n".join(p.hint for p in job.error.packs)
@@ -832,7 +1095,7 @@ class MainWindow(QMainWindow):
             self._refresh_counts()
 
         self.stages.busy("提取", tr("提取中"))
-        self.run_bg(lambda job: core.extract(game, plugin, store, force), done, tr("提取"))
+        self.run_bg(lambda job: core.extract(game, plugin, store, force), done, tr("提取"), key=("game", str(game.resolve())))
 
     def select_game_refresh(self):
         key, self.key = self.key, None
@@ -1067,7 +1330,9 @@ class MainWindow(QMainWindow):
     def start_translation(self, only=None, fresh=False):
         if not self.key:
             return
-        if self.lib.row(self.key, self.home)["no_need"]:
+        if getattr(self, "estimating", False):
+            return
+        if self._row(self.key)["no_need"]:
             QMessageBox.information(self, "YakuPatch", tr("遊戲內已有中文，不需翻譯"))
             return
         limit = None
@@ -1092,6 +1357,8 @@ class MainWindow(QMainWindow):
             return core.estimate(store, plugin, backend, limit, only, fresh, prepare=True)
 
         def estimated(job):
+            self.estimating = False
+            self._translation_buttons()
             if job.error:
                 self._error(job, tr("無法開始翻譯"))
                 self._handle_user_error(job, name)
@@ -1116,10 +1383,14 @@ class MainWindow(QMainWindow):
 
             job = self.run_bg(work, lambda j: self._translated(j, name), label, key=name)
             self.translation = (job, key)
+            self.tabs.setCurrentIndex(3)
+            self._translation_buttons()
             self.action_box.hide()
             self._show_progress(job)
             self.refresh_library()
 
+        self.estimating = True
+        self._translation_buttons()
         self.run_bg(estimate, estimated, tr("用量預估"))
 
     def _show_progress(self, job):
@@ -1168,8 +1439,13 @@ class MainWindow(QMainWindow):
     def _translation_buttons(self):
         job = self.translation[0] if self.translation else None
         live = job is not None and job.state in ("queued", "running")
-        self.pause_button.setEnabled(live)
-        self.cancel_button.setEnabled(live)
+        estimating = getattr(self, "estimating", False)
+        self.trial.setEnabled(self.scope.checkedId() == 3 and not live and not estimating)
+        selected = len(self.selected_ids())
+        self.scope.button(1).setText(tr("選取句子（{} 句）").format(selected))
+        self.start_button.setText(tr("估算中…") if estimating else tr("翻譯進行中") if live else tr("開始翻譯"))
+        self.start_button.setEnabled(bool(self.key) and not live and not estimating and
+                                     (self.scope.checkedId() != 1 or selected > 0))
         self.job_pause.setEnabled(live)
         self.job_cancel.setEnabled(live)
         self.resume_button.setEnabled(job is not None and (job.state == "paused" or isinstance(job.error, NEEDS_USER)))
@@ -1190,6 +1466,8 @@ class MainWindow(QMainWindow):
         old, key = self.translation
         name = old.key
         job = self.queue.resume(old)
+        self._job_serial += 1
+        job.gui_number = self._job_serial
         self.callbacks[job] = lambda j: self._translated(j, name)
         self.jobs.append(job)
         self.translation = (job, key)
@@ -1251,13 +1529,13 @@ class MainWindow(QMainWindow):
 
     # ---------- writeback tab ----------
     def preview(self):
-        if self.lib.row(self.key, self.home)["no_need"]:
+        if self._row(self.key)["no_need"]:
             return
         game, plugin, store = self.current
         key = self.key
 
         def done(job):
-            if self.key != key or self.lib.row(key, self.home)["no_need"]:
+            if self.key != key or self._row(key)["no_need"]:
                 return
             if self._error(job, tr("無法預覽")):
                 return
@@ -1281,12 +1559,13 @@ class MainWindow(QMainWindow):
             self.wb_notes.setText("\n".join(notes))
             self.apply_button.setEnabled(bool(self.plan.files))
 
-        self.run_bg(lambda job: core.preview(game, store, plugin), done, tr("寫回預覽"))
+        self.run_bg(lambda job: core.preview(game, store, plugin), done, tr("寫回預覽"), key=("game", str(game.resolve())))
 
     def apply(self):
-        if not self.plan or self.lib.row(self.key, self.home)["no_need"]:
+        if not self.plan or self._row(self.key)["no_need"]:
             return
         game = self.current[0]
+        key = self.key
         msg = tr("將修改 {} 個檔案，原檔會先備份到 _yakupatch_backup/。確定寫回？").format(len(self.plan.files))
         if QMessageBox.question(self, tr("寫回遊戲"), msg) != QMessageBox.Yes:
             return
@@ -1294,6 +1573,9 @@ class MainWindow(QMainWindow):
         self.apply_button.setEnabled(False)
 
         def done(job):
+            if self.key != key:
+                return
+            self.plan = None
             if not self._error(job, tr("寫回失敗，遊戲未被修改")):
                 self.statusBar().showMessage(tr("寫回完成"), 5000)
             self.stages.set("寫回", job.error is None, 1, tr("完成") if job.error is None else tr("未完成"))
@@ -1301,14 +1583,18 @@ class MainWindow(QMainWindow):
             self._refresh_counts()
 
         self.stages.busy("寫回", tr("寫回中"))
-        self.run_bg(lambda job: core.apply(game, plan), done, tr("寫回"))
+        self.run_bg(lambda job: core.apply(game, plan), done, tr("寫回"), key=("game", str(game.resolve())))
 
     def restore(self):
         game = self.current[0]
+        key = self.key
         if QMessageBox.question(self, tr("還原遊戲"), tr("把遊戲還原成寫回前的原檔？")) != QMessageBox.Yes:
             return
 
         def done(job):
+            if self.key != key:
+                return
+            self.plan = None
             if self._error(job, tr("還原失敗")):
                 return
             names = {"restored": tr("已還原"), "original": tr("已是原檔"), "stale": tr("遊戲已更新而略過")}
@@ -1323,7 +1609,7 @@ class MainWindow(QMainWindow):
             self.refresh_library()
             self._refresh_counts()
 
-        self.run_bg(lambda job: core.restore(game), done, tr("還原"))
+        self.run_bg(lambda job: core.restore(game), done, tr("還原"), key=("game", str(game.resolve())))
 
     def launch(self):
         try:

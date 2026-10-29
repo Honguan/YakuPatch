@@ -38,6 +38,14 @@ def wait(cond, timeout=10):
 
 @unittest.skipIf(QApplication is None, "PySide6 not installed")
 class Launch(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        env = patch.dict(os.environ, {"YAKUPATCH_HOME": folder.name})
+        env.start()
+        self.addCleanup(env.stop)
+
     def test_main_shows_window(self):
         from yakupatch import gui
         with patch("yakupatch.gui.window.MainWindow") as win, patch.object(QApplication, "exec", return_value=0):
@@ -97,6 +105,220 @@ class Gui(unittest.TestCase):
 
     def idle(self):
         self.assertTrue(wait(lambda: not self.win.callbacks))
+
+    def test_library_filter_reuses_rows_and_open_store(self):
+        with patch.object(self.win.lib, "row", side_effect=AssertionError("disk reload")):
+            self.win.search.setText("missing")
+            self.assertTrue(self.win.lib_list.item(0).isHidden())
+            self.win.search.clear()
+            self.assertEqual(self.win.lib_list.count(), 1)
+            self.assertFalse(self.win.lib_list.item(0).isHidden())
+        with patch("yakupatch.core.Store", side_effect=AssertionError("store reloaded")):
+            self.win._refresh_counts()
+
+    def test_filter_keeps_items_without_reloading_game(self):
+        win = self.win
+        item = win.lib_list.item(0)
+        item.setSelected(True)
+        with patch.object(win.lib_list, "clear", side_effect=AssertionError("list rebuilt")), \
+             patch.object(win, "_open_game", side_effect=AssertionError("game reloaded")):
+            win.lib_filter.setCurrentText("已寫回")
+            self.assertTrue(item.isHidden())
+            self.assertFalse(item.isSelected())
+            win.lib_filter.setCurrentText("全部")
+            self.assertIs(win.lib_list.item(0), item)
+            self.assertFalse(item.isHidden())
+
+    def test_job_controls_have_one_entry_and_overview_only_navigates(self):
+        from PySide6.QtWidgets import QPushButton, QLabel
+        win = self.win
+        for text in ("暫停", "繼續", "取消"):
+            self.assertEqual(sum(b.text() == text for b in win.findChildren(QPushButton)), 1)
+        self.assertTrue(all(isinstance(label, QLabel) for label in win.step_labels))
+        win.extract()
+        self.idle()
+        self.assertEqual(win.primary.text(), "前往翻譯")
+        with patch.object(win, "start_translation", side_effect=AssertionError("translation started")):
+            win.primary.click()
+            self.assertEqual(win.tabs.currentIndex(), 3)
+
+    def test_secondary_actions_are_grouped_and_still_callable(self):
+        from PySide6.QtWidgets import QPushButton
+        from unittest.mock import Mock
+        buttons = self.win.findChildren(QPushButton)
+        menus = {b.text(): b.menu() for b in buttons if b.menu()}
+        for title, actions in {
+            "遊戲庫管理": ["掃描資料夾", "重新掃描", "掃描資料夾清單", "移除不需翻譯", "移除不支援"],
+            "更多文本操作": ["套用到相同原文", "全文 QA"],
+            "查詢譯名": ["查字典", "VNDB 角色名單", "Wikidata 查譯名"],
+            "匯入／匯出": ["匯出分批檔", "匯入譯文", "匯出分享檔"],
+            "遊戲操作": ["還原遊戲", "啟動遊戲"],
+        }.items():
+            self.assertEqual([a.text() for a in menus[title].actions()], actions)
+            self.assertFalse(any(b.text() in actions for b in buttons))
+        self.assertFalse(any(b.text() == "重翻此句" for b in buttons))
+        self.assertEqual(self.win.f_flag.findData("failed"), -1)
+        callback = Mock()
+        button = self.win._menu_button("test", (("action", callback),))
+        button.menu().actions()[0].trigger()
+        callback.assert_called_once()
+
+    def test_translation_scope_and_estimate_guard(self):
+        win = self.win
+        self.assertFalse(win.trial.isEnabled())
+        win.scope.button(3).setChecked(True)
+        self.assertTrue(win.trial.isEnabled())
+        win.scope.button(1).setChecked(True)
+        self.assertFalse(win.start_button.isEnabled())
+        self.assertIn("0 句", win.scope.button(1).text())
+        win.estimating = True
+        win._translation_buttons()
+        self.assertEqual(win.start_button.text(), "估算中…")
+        with patch.object(win, "make_backend", side_effect=AssertionError("duplicate estimate")):
+            win.start_translation()
+
+    def test_continuous_changes_refresh_without_reloading_history(self):
+        win = self.win
+        with patch.object(win, "_refresh_counts") as refresh, patch.object(win.model, "changed"):
+            for _ in range(8):
+                win._store_changed(self.key, [])
+                QTest.qWait(60)
+            self.assertGreaterEqual(refresh.call_count, 1)
+            refresh.assert_called_with(history=False)
+        win._dirty.stop()
+        with patch.object(win, "load_history", side_effect=AssertionError("history reload")):
+            win._refresh_counts(history=False)
+
+    def test_progress_does_not_read_library_from_disk(self):
+        from types import SimpleNamespace
+        job = SimpleNamespace(state="running", key="test", label="test", progress={"total": 100})
+        win = self.win
+        win.jobs.append(job)
+        try:
+            with patch.object(win, "_row", side_effect=AssertionError("disk read")):
+                for i in range(100):
+                    job.progress["translated"] = i
+                    win._job_changed(job)
+            self.assertEqual(win.job_bar.value(), 99)
+        finally:
+            win.jobs.remove(job)
+
+    def test_activity_matches_console_without_progress_spam(self):
+        from unittest.mock import Mock
+        job = Mock(state="running", label="提取", gui_number=7, gui_state=None, error=None,
+                   key="test", progress={})
+        win = self.win
+        with patch("builtins.print") as output:
+            win._job_changed(job)
+            win._job_changed(job)
+            self.assertEqual(output.call_count, 1)
+            self.assertEqual(win.activity.toPlainText(), output.call_args.args[0])
+            job.state = "failed"
+            job.error = ValueError("test failure")
+            win._job_changed(job)
+            self.assertEqual(output.call_count, 2)
+            self.assertIn("#7 提取：失敗", win.activity.toPlainText())
+            self.assertIn("test failure", win.activity.toPlainText())
+
+    def test_console_chunks_keep_partial_lines_and_limit_large_lines(self):
+        win = self.win
+        win.console_output("原生錯")
+        win.console_output("誤\n下一行")
+        self.assertEqual(win.activity.toPlainText(), "原生錯誤\n下一行")
+        win.console_output("x" * 210000)
+        self.assertLessEqual(win.activity.document().characterCount(), 200000)
+
+    def test_activity_error_filter_preserves_full_text(self):
+        win = self.win
+        text = "normal output\nERROR native failure\n工作失敗\ncompleted"
+        win.console_output(text)
+        win.activity_errors.setChecked(True)
+        block = win.activity.document().begin()
+        visible = []
+        while block.isValid():
+            if block.isVisible():
+                visible.append(block.text())
+            block = block.next()
+        self.assertEqual(visible, ["ERROR native failure", "工作失敗"])
+        self.assertEqual(win.activity.toPlainText(), text)
+        win.activity_errors.setChecked(False)
+        self.assertTrue(win.activity.document().begin().isVisible())
+
+    def test_export_activity_uses_full_saved_log(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        target = self.home / "export.log"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        export = Mock(side_effect=lambda path: path.write_text("normal\nERROR\n", encoding="utf8"))
+        self.win.capture = SimpleNamespace(log_path=self.home / "source.log", export=export)
+        self.win.activity_errors.setChecked(True)
+        with patch("yakupatch.gui.window.QFileDialog.getSaveFileName", return_value=(str(target), "")):
+            self.win.export_activity()
+            self.idle()
+        export.assert_called_once_with(target)
+        self.assertEqual(target.read_text(encoding="utf8"), "normal\nERROR\n")
+
+    def test_history_search_and_live_output_are_separate(self):
+        from types import SimpleNamespace
+        win = self.win
+        self.home.mkdir(parents=True, exist_ok=True)
+        old = self.home / "gui-20200101.log"
+        old.write_text("normal\nERROR previous crash\n", encoding="utf8")
+        win.capture = SimpleNamespace(log_path=self.home / "gui-current.log")
+        win.refresh_logs()
+        win.log_choice.setCurrentIndex(win.log_choice.findData(str(old)))
+        self.idle()
+        self.assertIn("previous crash", win.history_log.toPlainText())
+        win.console_output("live output\n")
+        self.assertNotIn("live output", win.history_log.toPlainText())
+        win.log_search.setText("PREVIOUS")
+        QTest.qWait(250)
+        self.idle()
+        self.assertEqual(win.history_log.toPlainText().strip(), "ERROR previous crash")
+        win.refresh_logs()
+        self.idle()
+        self.assertEqual(win.log_choice.currentData(), str(old))
+        target = self.home / "history-export.log"
+        with patch("yakupatch.gui.window.QFileDialog.getSaveFileName", return_value=(str(target), "")):
+            win.export_activity()
+            self.idle()
+        self.assertEqual(target.read_bytes(), old.read_bytes())
+        win.log_choice.setCurrentIndex(0)
+        self.assertIn("live output", win.activity.toPlainText())
+
+    def test_previous_crash_jump_clears_filters_and_selects_error(self):
+        win = self.win
+        self.home.mkdir(parents=True, exist_ok=True)
+        path = self.home / "gui-crash.log"
+        path.write_text("before\nERROR crash\nafter\n", encoding="utf8")
+        win.show_previous_crash(path)
+        self.assertFalse(win.crash_notice.isHidden())
+        win.log_search.setText("missing")
+        win.activity_errors.setChecked(True)
+        win.view_previous_crash()
+        self.idle()
+        self.assertEqual(win.history_log.textCursor().selectedText(), "ERROR crash")
+        self.assertIn("before", win.history_log.toPlainText())
+        self.assertIn("after", win.history_log.toPlainText())
+        self.assertFalse(win.activity_errors.isChecked())
+        self.assertFalse(win.activity_dock.isHidden())
+
+    def test_preview_and_apply_are_serialized_for_same_game(self):
+        from yakupatch.writeback import ApplyPlan
+        win=self.win;entered=threading.Event();release=threading.Event();written=threading.Event()
+        def preview(*args):
+            entered.set();release.wait(5);return ApplyPlan()
+        try:
+            with patch("yakupatch.core.preview", side_effect=preview), patch("yakupatch.core.apply", side_effect=lambda *a: written.set()):
+                win.preview()
+                self.assertTrue(entered.wait(2))
+                win.plan=ApplyPlan();win.apply()
+                QTest.qWait(50)
+                self.assertFalse(written.is_set())
+                release.set();self.idle()
+                self.assertTrue(written.is_set())
+        finally:
+            release.set()
 
     def test_model_filter_and_store_events(self):
         store = Store(project_dir(self.game, engines.PLUGINS[0], self.home))
@@ -175,7 +397,7 @@ class Gui(unittest.TestCase):
         win.extract()
         self.idle()
         pending = []
-        with patch.object(win, "run_bg", side_effect=lambda fn, done, label: pending.append(done)):
+        with patch.object(win, "run_bg", side_effect=lambda fn, done, label, **kw: pending.append(done)):
             win.preview()
         win.set_builtin_chinese(self.key, True)
         from types import SimpleNamespace
@@ -196,7 +418,7 @@ class Gui(unittest.TestCase):
         win.extract()
         self.idle()
         self.assertGreater(win.model.rowCount(), 0)
-        self.assertEqual(win.primary.text(), "開始翻譯")
+        self.assertEqual(win.primary.text(), "前往翻譯")
         store = win.current[2]
 
         gate = threading.Event()
@@ -236,7 +458,7 @@ class Gui(unittest.TestCase):
         win.apply()
         self.idle()
         self.assertNotEqual(snapshot(self.game), self.original)
-        self.assertIn("✓", win.step_buttons[4].text())
+        self.assertIn("✓", win.step_labels[4].text())
 
         run = next(r["run"] for r in core.history(store) if r["by"].startswith("ids"))
         win.load_history()

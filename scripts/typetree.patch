@@ -25,7 +25,7 @@ index fb00e4a..e54e51a 100644
              return nodes;
          }
 diff --git a/TypeTreeGeneratorAPI/TypeTreeGenerator/AssetStudio/AssetStudioUtility/TypeDefinitionConverter.cs b/TypeTreeGeneratorAPI/TypeTreeGenerator/AssetStudio/AssetStudioUtility/TypeDefinitionConverter.cs
-index 16b8b59..0ef532b 100644
+index 16b8b59..86b5514 100644
 --- a/TypeTreeGeneratorAPI/TypeTreeGenerator/AssetStudio/AssetStudioUtility/TypeDefinitionConverter.cs
 +++ b/TypeTreeGeneratorAPI/TypeTreeGenerator/AssetStudio/AssetStudioUtility/TypeDefinitionConverter.cs
 @@ -11,10 +11,10 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
@@ -41,15 +41,41 @@ index 16b8b59..0ef532b 100644
              Helper = helper;
              Indent = indent;
          }
-@@ -93,6 +93,7 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
-         private IEnumerable<FieldDefinition> FilteredFields()
+@@ -53,7 +53,7 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
+                     TypeResolver.Remove(genericInstanceType);
+                 }
+             }
+-            foreach (var field in FilteredFields())
++            foreach (var field in TypeDef.Fields.Where(WillUnitySerialize))
+             {
+                 nodes.AddRange(ProcessingFieldRef(field));
+             }
+@@ -72,7 +72,8 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
+                 }
+                 if (!UnityEngineTypePredicates.IsUnityEngineObject(resolvedFieldType))
+                 {
+-                    if (resolvedFieldType.FullName == fieldDefinition.DeclaringType.FullName)
++                    if (!UnitySerializationLogic.HasSerializeReferenceAttribute(fieldDefinition)
++                        && resolvedFieldType.FullName == fieldDefinition.DeclaringType.FullName)
+                     {
+                         return false;
+                     }
+@@ -90,14 +91,6 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
+             return processingType.Fields.Any(f => f.Name == fieldDefinition.Name) || parentTypes.Any(t => t.Resolve().Fields.Any(f => f.Name == fieldDefinition.Name));
+         }
+ 
+-        private IEnumerable<FieldDefinition> FilteredFields()
+-        {
+-            return TypeDef.Fields.Where(WillUnitySerialize).Where(f =>
+-                UnitySerializationLogic.IsSupportedCollection(f.FieldType) ||
+-                !f.FieldType.IsGenericInstance ||
+-                UnitySerializationLogic.ShouldImplementIDeserializable(f.FieldType.Resolve()));
+-        }
+-
+         private FieldReference ResolveGenericFieldReference(FieldReference fieldRef)
          {
-             return TypeDef.Fields.Where(WillUnitySerialize).Where(f =>
-+                UnitySerializationLogic.HasSerializeReferenceAttribute(f) ||
-                 UnitySerializationLogic.IsSupportedCollection(f.FieldType) ||
-                 !f.FieldType.IsGenericInstance ||
-                 UnitySerializationLogic.ShouldImplementIDeserializable(f.FieldType.Resolve()));
-@@ -122,7 +123,7 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
+             var field = new FieldReference(fieldRef.Name, fieldRef.FieldType, ResolveDeclaringType(fieldRef.DeclaringType));
+@@ -122,7 +115,7 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
          private List<TypeTreeNode> ProcessingFieldRef(FieldReference fieldDef)
          {
              var typeRef = TypeResolver.Resolve(fieldDef.FieldType);
@@ -58,7 +84,7 @@ index 16b8b59..0ef532b 100644
          }
  
          private static bool IsStruct(TypeReference typeRef)
-@@ -156,7 +157,7 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
+@@ -156,7 +149,7 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
              return typeRef.FullName == "System.String";
          }
  
@@ -67,7 +93,7 @@ index 16b8b59..0ef532b 100644
          {
              var align = false;
  
-@@ -232,19 +233,24 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
+@@ -232,19 +225,28 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
                  var elementRef = CecilUtils.ElementTypeOfCollection(typeRef);
                  nodes.Add(new TypeTreeNode(typeRef.Name, name, indent, align));
                  Helper.AddArray(nodes, indent + 1);
@@ -87,7 +113,11 @@ index 16b8b59..0ef532b 100644
              {
                  Helper.AddPPtr(nodes, typeRef.Name, name, indent);
              }
-+            else if (managedReference)
++            else if (typeRef is GenericInstanceType lazy && lazy.ElementType.FullName == "UnityEngine.LazyLoadReference`1")
++            {
++                Helper.AddPPtr(nodes, lazy.GenericArguments[0].Name, name, indent);
++            }
++            else if (managedReference && !typeRef.Resolve().IsValueType)
 +            {
 +                nodes.Add(new TypeTreeNode("managedReference", name, indent));
 +                nodes.Add(new TypeTreeNode("SInt64", "rid", indent + 1));
@@ -95,7 +125,7 @@ index 16b8b59..0ef532b 100644
              else if (UnityEngineTypePredicates.IsSerializableUnityClass(typeRef) || UnityEngineTypePredicates.IsSerializableUnityStruct(typeRef))
              {
                  switch (typeRef.FullName)
-@@ -279,8 +285,17 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
+@@ -279,8 +281,17 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetStudio.AssetStudioUtility
              {
                  nodes.Add(new TypeTreeNode(typeRef.Name, name, indent, align));
                  var typeDef = typeRef.Resolve();
@@ -115,3 +145,66 @@ index 16b8b59..0ef532b 100644
              }
  
              return nodes;
+diff --git a/TypeTreeGeneratorAPI/TypeTreeGenerator/AssetsTools/MonoBehaviourTemplateGeneratorPatch.cs b/TypeTreeGeneratorAPI/TypeTreeGenerator/AssetsTools/MonoBehaviourTemplateGeneratorPatch.cs
+index 46ba049..d155c56 100644
+--- a/TypeTreeGeneratorAPI/TypeTreeGenerator/AssetsTools/MonoBehaviourTemplateGeneratorPatch.cs
++++ b/TypeTreeGeneratorAPI/TypeTreeGenerator/AssetsTools/MonoBehaviourTemplateGeneratorPatch.cs
+@@ -51,7 +51,11 @@ namespace TypeTreeGeneratorAPI.TypeTreeGenerator.AssetsTools
+             {
+                 assemblyName += ".dll";
+             }
+-            var asm = loadedAssemblies[assemblyName];
++            if (!loadedAssemblies.TryGetValue(assemblyName, out var asm) || string.IsNullOrEmpty(className))
++                return null;
++            var fullName = string.IsNullOrEmpty(nameSpace) ? className : nameSpace + "." + className;
++            if (asm.MainModule.GetType(fullName) == null)
++                return null;
+ 
+             List<AssetTypeTemplateField> newFields = Read(asm, nameSpace, className, unityVersion);
+             if (newFields == null)
+diff --git a/UnityCsReference/Tools/Unity.SerializationLogic/UnitySerializationLogic.cs b/UnityCsReference/Tools/Unity.SerializationLogic/UnitySerializationLogic.cs
+index 26f1a380..0aa82c05 100644
+--- a/UnityCsReference/Tools/Unity.SerializationLogic/UnitySerializationLogic.cs
++++ b/UnityCsReference/Tools/Unity.SerializationLogic/UnitySerializationLogic.cs
+@@ -15,6 +15,7 @@ namespace Unity.SerializationLogic
+     internal class GenericInstanceHolder
+     {
+         public int Count;
++        public GenericInstanceHolder Previous;
+         public IGenericInstance GenericInstance;
+     }
+ 
+@@ -180,7 +181,10 @@ namespace Unity.SerializationLogic
+                 var storedValue = (MemberReference)oldValue.GenericInstance;
+ 
+                 if (storedValue.FullName != memberReference.FullName)
+-                    throw new ArgumentException("Duplicate key!", "key");
++                {
++                    _context[key] = new GenericInstanceHolder { Count = 1, GenericInstance = value, Previous = oldValue };
++                    return;
++                }
+ 
+                 oldValue.Count++;
+                 return;
+@@ -206,7 +210,10 @@ namespace Unity.SerializationLogic
+ 
+                 oldValue.Count--;
+                 if (oldValue.Count == 0)
+-                    _context.Remove(key);
++                {
++                    if (oldValue.Previous == null) _context.Remove(key);
++                    else _context[key] = oldValue.Previous;
++                }
+ 
+                 return;
+             }
+@@ -429,6 +436,9 @@ namespace Unity.SerializationLogic
+             if (IsGenericDictionary(typeReference))
+                 return false;
+ 
++            if (typeReference.Resolve().IsAbstract && !IsUnityEngineObject(typeReference))
++                return false;
++
+             if (IsUnityEngineObject(typeReference) ||
+                 ShouldImplementIDeserializable(typeReference) ||
+                 UnityEngineTypePredicates.IsSerializableUnityClass(typeReference))

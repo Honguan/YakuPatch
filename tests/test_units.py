@@ -170,6 +170,28 @@ class EndToEnd(unittest.TestCase):
         self.assertNotIn("text = ありがとう", srcs)                    # 657 is editor-only display
         self.assertTrue(any("$gameVariables" in s for s in srcs) is False)   # 355 script never extracted
 
+    def test_extraction_groups_files_in_one_pass(self):
+        from unittest.mock import patch
+        from yakupatch.engines.base import Segment
+        class Counted(list):
+            iterations = 0
+            def __iter__(self):
+                self.iterations += 1
+                return super().__iter__()
+        files = {str(i): {} for i in range(100)}
+        segments = Counted((str(i), Segment("loc", "dialogue", "こんにちは！")) for i in range(100))
+        with patch("yakupatch.extract.read_game", return_value=(files,segments)), \
+             patch("yakupatch.extract.probe", return_value=({},[])), patch("yakupatch.extract.seed_glossary"):
+            extract(self.game, MZ, self.store, force=True)
+        self.assertEqual(segments.iterations,1)
+        self.assertEqual(len(next(iter(self.store.records.values()))["refs"]),100)
+
+    def test_binary_outputs_do_not_decode_unused_text(self):
+        from unittest.mock import patch
+        self.translate_all()
+        with patch.object(MZ, "outputs", return_value={}), patch.object(MZ, "decode", side_effect=AssertionError("unneeded decode")):
+            self.assertEqual(writeback.plan(self.game, self.store, MZ).files, [])
+
     def test_full_cycle_apply_restore(self):
         self.translate_all()
         plan = writeback.plan(self.game, self.store, MZ)

@@ -105,6 +105,31 @@ class MonoStrings(unittest.TestCase):
 
 
 class TypeTree(unittest.TestCase):
+    def test_font_bulk_write_matches_original_layout(self):
+        from unittest.mock import Mock
+        from UnityPy.helpers.TypeTreeHelper import write_typetree
+        from UnityPy.helpers.TypeTreeNode import TypeTreeNode
+        from UnityPy.streams import EndianBinaryWriter
+        from yakupatch.engines.unity import _save_font
+        for endian in ("<", ">"):
+            for length in (0, 1, 3, 4, 257):
+                nodes = TypeTreeNode.from_list([
+                    dict(m_Level=l, m_Type=t, m_Name=n, m_ByteSize=-1, m_Version=1, m_MetaFlag=f)
+                    for l, t, n, f in [(0,"Font","Base",0), (1,"int","before",0),
+                        (1,"vector","m_FontData",0), (2,"Array","Array",0x4000),
+                        (3,"int","size",0), (3,"UInt8","data",0), (1,"int","after",0)]])
+                font = bytes(i % 256 for i in range(length))
+                tree = {"before":17,"m_FontData":list(font),"after":99}
+                expected = EndianBinaryWriter(endian=endian)
+                write_typetree(tree,nodes,expected)
+                obj = Mock();obj._get_typetree_node.return_value = nodes
+                actual = EndianBinaryWriter(endian=endian)
+                obj.save_typetree.side_effect = lambda data, schema: write_typetree(data,schema,actual)
+                _save_font(obj,tree,font)
+                self.assertEqual(actual.bytes,expected.bytes)
+                self.assertIs(tree["m_FontData"],font)
+                self.assertEqual(nodes.m_Children[1].m_Type,"vector")
+
     def test_scan_fingerprint_detects_content_and_backup_changes(self):
         import tempfile
         import os
@@ -235,6 +260,36 @@ class TypeTree(unittest.TestCase):
         for invalid in (b"", b"bad header", bytes(128), encoded[:100]):
             with self.assertRaises(ValueError):
                 _metadata(invalid)
+
+    def test_shuffled_metadata_validates_sections_before_decoding(self):
+        from yakupatch.engines.unity import _metadata
+        header = bytes.fromhex(
+            "c2c3c4c5fac5c8c9a2c9cccdaaced0d1d2d3d4d56ed6d8d9dadbdcdd16dee0e1e2e3e4e582e6e8e9eaebecedeeeff0f1f2"
+            "f3f4f5f6f7f8f9fafbfcfdfeff000102030405c20608090a0b0c0d260f10111213141572151819861a1c1d1e1f20212223"
+            "2425262728292a2b2c2d4a2e30313233343536373839663a3c3d3e3f40414243444566454849164a4c4d9e4e5051ea5254"
+            "55fa565859025b5c5d5e5f60616263646566676869a26a6c6d6e6f7071727374754e7578797a7b7c7d7e7f808182838485"
+            "8e8788898a8b8c8d328e909142929495969798993e9a9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6"
+            "b7b8b996b9bcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7"
+            "e8e962e9ecedeeeff0f1f2f3f4f5d6f5f8f95afafcfdfeff00011e0104052a0508090a0b0c0d0e0f101152131415161718"
+            "191a1b1c1d6a1e20214e212425e22628292a2b2c2d2e2f303132333435363738393a3b3c3dfa3e40414243444546474849"
+        )
+        image = struct.pack("<10i", 0, 0, 0, 1, -1, 0, -1, 0x2000001, 0, 0)
+        raw = header + bytes.fromhex("36561d16177c7d7e") + bytes(88) + image + bytes(range(193, 256)) + b"\0"
+        decoded = _metadata(raw)
+        self.assertEqual(struct.unpack_from("<8I", decoded), (0xFAB11BAF, 29, 392, 0, 392, 0, 392, 8))
+        self.assertEqual(decoded[392:], b"A.dll\0\0\0" + bytes(88) + image + bytes(64))
+        self.assertEqual(struct.unpack_from("<8I", decoded, 160), (400, 88, 488, 40, 528, 64, 592, 0))
+        for offset, value in ((0x44, 1000000), (0xc4, 1000000), (0x8c, 0), (0x4c, 39), (0x40, 4)):
+            damaged = bytearray(raw)
+            damaged[offset:offset+4] = bytes(v ^ ((offset+i+194) & 255) for i, v in enumerate(struct.pack("<I", value)))
+            with self.subTest(offset=offset), self.assertRaises(ValueError):
+                _metadata(bytes(damaged))
+        with self.assertRaises(ValueError):
+            _metadata(raw[:-1])
+        damaged = bytearray(raw)
+        struct.pack_into("<i", damaged, 488 + 8, -1)  # a nonempty image cannot have a missing first type
+        with self.assertRaises(ValueError):
+            _metadata(bytes(damaged))
 
     def test_empty_reference_roundtrip_and_nonempty_rejection(self):
         from unittest.mock import Mock, patch
@@ -372,6 +427,25 @@ class TypeTree(unittest.TestCase):
         ctx.gen = None                                       # the game's IL2CPP code could not be loaded
         with self.assertRaises(ValueError):
             ctx.tree(SimpleNamespace(serialized_type=None))
+
+    def test_missing_assembly_and_empty_script_do_not_enter_native_generator(self):
+        from unittest.mock import Mock
+        ctx = _Context.__new__(_Context)
+        ctx.gen, ctx.nodes, ctx.assemblies = Mock(), {}, {"Assembly-CSharp.dll"}
+        ms = SimpleNamespace(m_ClassName="Missing", m_AssemblyName="", m_Namespace="Game")
+        ctx.script = lambda obj: ms
+        obj = SimpleNamespace(serialized_type=None)
+        for assembly in ("", "BroAudioEditor.dll", "VRCCore-Editor.dll", "Assembly-CSharp-Editor.dll"):
+            ms.m_AssemblyName = assembly
+            with self.assertRaises(ValueError):
+                ctx.tree(obj)
+        ms.m_AssemblyName, ms.m_ClassName = "Assembly-CSharp.dll", ""
+        with self.assertRaises(ValueError):
+            ctx.tree(obj)
+        ctx.gen.get_nodes_as_json.assert_not_called()
+        obj.serialized_type = SimpleNamespace(node=object())
+        obj.read_typetree = lambda: {"text": "stored"}
+        self.assertEqual(ctx.tree(obj)[1], {"text": "stored"})
 
     def test_normalizes_assembly_and_keeps_other_classes_readable(self):
         from unittest.mock import Mock
