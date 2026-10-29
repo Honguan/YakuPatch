@@ -1025,8 +1025,9 @@ class MainWindow(QMainWindow):
         self.title.setText(f"{game.name if game.name.lower() != 'www' else game.parent.name}    "
                            f"{plugin.name}  [{row['lang']}]")
         marks = [True, bool(probe), extracted, extracted and c["pending"] + c["failed"] == 0 and todo > 0, applied]
+        # Plain status text avoids a slow first-use symbol font fallback on Windows.
         for b, name, ok, i in zip(self.step_labels, STEPS, marks, range(5)):
-            b.setText(tr(name) + (" ✓" if ok else f" {pct}%" if i == 3 and extracted else ""))
+            b.setText(tr(name) + (" " + tr("完成") if ok else f" {pct}%" if i == 3 and extracted else ""))
         self.info.setText(tr("路徑：{}\n引擎：{}（偵測分數 {:.2f}）\n文本檔：{} 個\n句數：共 {}，待翻 {}，已翻 {}，"
                              "已審閱 {}，失敗 {}，不翻 {}，不確定 {}").format(
             game, plugin.name, plugin.detect(game), len(store.manifest.get("files", {})), c["total"], c["pending"],
@@ -1041,7 +1042,7 @@ class MainWindow(QMainWindow):
             if self.tabs.currentIndex() in (1, 2, 3):
                 self.tabs.setCurrentIndex(0)
         if probe:
-            head = (tr("語言預檢：{} ✓ 可以翻譯") if not zh else tr("語言預檢：已是{}，不需翻譯")).format(
+            head = (tr("語言預檢：{}，可以翻譯") if not zh else tr("語言預檢：已是{}，不需翻譯")).format(
                 _LANG.get(probe["primary"], probe["primary"]))
             self.lang_card.setText(f"{head}\n" + tr("假名比例 {:.0%}　簡體專有字 {}　繁體專有字 {}　內建語言包：{}").format(
                 probe.get("kana_ratio", 0), probe.get("simp_only", 0), probe.get("trad_only", 0),

@@ -458,7 +458,7 @@ class Gui(unittest.TestCase):
         win.apply()
         self.idle()
         self.assertNotEqual(snapshot(self.game), self.original)
-        self.assertIn("✓", win.step_labels[4].text())
+        self.assertIn("完成", win.step_labels[4].text())
 
         run = next(r["run"] for r in core.history(store) if r["by"].startswith("ids"))
         win.load_history()
