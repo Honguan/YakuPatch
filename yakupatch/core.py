@@ -162,7 +162,8 @@ def batch(paths: list, make_backend, home: Path | None = None, apply=False, limi
 
 
 def preview(game: Path, store: Store, plugin) -> writeback.ApplyPlan:
-    return writeback.plan(game, store, plugin)
+    # Unity's large native memory copies hold the GIL even on a worker thread.
+    return (writeback.isolated_plan if plugin.name == "unity" else writeback.plan)(game, store, plugin)
 
 
 def apply(game: Path, plan: writeback.ApplyPlan) -> None:
@@ -415,6 +416,8 @@ class Library:
             if not fingerprint or entry.get("scan_fingerprint") != fingerprint or entry.get("unsupported") \
                     or entry.get("engine") != plugin.name:
                 entry.update({"engine": plugin.name, **_detect(game, plugin), "scan_fingerprint": fingerprint})
+                if entry.get("unsupported"):
+                    print(f"[掃描失敗] {game}：{entry['unsupported']}", flush=True)
             added.append(str(game))
         self._save()
         return added

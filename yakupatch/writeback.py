@@ -2,6 +2,12 @@
 import re
 import shutil
 import unicodedata
+import json
+import pickle
+import subprocess
+import sys
+import tempfile
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -51,6 +57,26 @@ class ApplyPlan:
     warnings: list[str] = field(default_factory=list)
     # Physical writes for W7: path -> (bytes, is_header); bytes None deletes a file we created earlier.
     writes: dict[str, tuple[bytes | None, bool]] = field(default_factory=dict)
+
+
+def isolated_plan(game_dir: Path, store: Store, plugin: EnginePlugin) -> ApplyPlan:
+    """Run the same planner without letting native asset serialization block the GUI's GIL."""
+    with tempfile.TemporaryDirectory(prefix="yakupatch-preview-") as folder:
+        folder = Path(folder)
+        (folder / "input.json").write_text(json.dumps({"manifest": store.manifest, "records": store.records},
+                                                     ensure_ascii=False), encoding="utf-8")
+        with subprocess.Popen([sys.executable, "-X", "utf8", "-X", "faulthandler", "-m", "yakupatch.preview_worker",
+                               str(game_dir), plugin.name, str(folder)], stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+                              creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0) as child:
+            for line in child.stdout:
+                print(line, end="", flush=True)
+            if child.wait():
+                detail = folder / "error.txt"
+                raise RuntimeError(detail.read_text("utf-8") if detail.exists() else
+                                   f"寫回預覽程序異常結束（{child.returncode}），請查看工作紀錄")
+        with (folder / "plan.pickle").open("rb") as source:
+            return pickle.load(source)  # Only our child writes this private temporary file.
 
 
 def plan(game_dir: Path, store: Store, plugin: EnginePlugin) -> ApplyPlan:

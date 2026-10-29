@@ -13,6 +13,20 @@ from test_codex import IdsFake
 
 
 class CoreApi(unittest.TestCase):
+    def test_isolated_preview_matches_in_memory_translations(self):
+        from yakupatch.writeback import isolated_plan, plan
+        for rec in self.store.records.values():
+            if rec['status'] == 'pending':
+                rec.update(dst=rec['src'] + '測試', status='translated')
+        expected = plan(self.game, self.store, self.plugin)
+        actual = isolated_plan(self.game, self.store, self.plugin)
+        self.assertEqual(actual, expected)
+        self.assertTrue(actual.files)
+        first = next(iter(self.store.manifest['files'].values()))
+        first['sha256'] = 'changed'
+        with self.assertRaisesRegex(RuntimeError, '遊戲檔案已變動'):
+            isolated_plan(self.game, self.store, self.plugin)
+
     def setUp(self):
         self.game, self.home = copy_game("mz_min")
         self.plugin = engines.PLUGINS[0]

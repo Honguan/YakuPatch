@@ -105,6 +105,32 @@ class MonoStrings(unittest.TestCase):
 
 
 class TypeTree(unittest.TestCase):
+    def test_yoo_localization_requires_dialogue_and_labels(self):
+        import tempfile
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        from yakupatch.engines.unity import Unity
+        with tempfile.TemporaryDirectory() as folder:
+            game = Path(folder)
+            data = game / 'Game_Data'
+            bundle = data / 'StreamingAssets/res/DefaultPackage/tables.bundle'
+            bundle.parent.mkdir(parents=True)
+            (data / 'globalgamemanagers').write_bytes(b'')
+            raw = b'UnityFS\0fixture'
+            bundle.write_bytes(bytes(v ^ 91 for v in raw))
+            def asset(name, rows):
+                return SimpleNamespace(type=SimpleNamespace(name='TextAsset'),
+                    read=lambda: SimpleNamespace(m_Name=name, m_Script=json.dumps(rows)))
+            rows = [{'tag': str(i), 'ch': '测试内容', 'tr_ch': '測試內容', 'jp': 'テスト'} for i in range(30)]
+            objects = [asset('LocalizationLabelTable', rows)]
+            with patch('UnityPy.load', return_value=SimpleNamespace(objects=objects)) as load:
+                self.assertEqual(Unity().language_packs(game), [])
+                objects.append(asset('LocalizationDialogTable', rows))
+                self.assertEqual({p.lang for p in Unity().language_packs(game)}, {'zh-Hans', 'zh-Hant'})
+                load.assert_called_with(raw)
+                objects[-1] = asset('LocalizationDialogTable', rows[:1])
+                self.assertEqual(Unity().language_packs(game), [])
+
     def test_font_bulk_write_matches_original_layout(self):
         from unittest.mock import Mock
         from UnityPy.helpers.TypeTreeHelper import write_typetree
