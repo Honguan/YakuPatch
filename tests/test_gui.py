@@ -134,6 +134,27 @@ class Gui(unittest.TestCase):
             win.primary.click()
             self.assertEqual(win.tabs.currentIndex(), 3)
 
+    def test_secondary_actions_are_grouped_and_still_callable(self):
+        from PySide6.QtWidgets import QPushButton
+        from unittest.mock import Mock
+        buttons = self.win.findChildren(QPushButton)
+        menus = {b.text(): b.menu() for b in buttons if b.menu()}
+        for title, actions in {
+            "遊戲庫管理": ["掃描資料夾", "重新掃描", "掃描資料夾清單", "移除不需翻譯", "移除不支援"],
+            "更多文本操作": ["套用到相同原文", "全文 QA"],
+            "查詢譯名": ["查字典", "VNDB 角色名單", "Wikidata 查譯名"],
+            "匯入／匯出": ["匯出分批檔", "匯入譯文", "匯出分享檔"],
+            "遊戲操作": ["還原遊戲", "啟動遊戲"],
+        }.items():
+            self.assertEqual([a.text() for a in menus[title].actions()], actions)
+            self.assertFalse(any(b.text() in actions for b in buttons))
+        self.assertFalse(any(b.text() == "重翻此句" for b in buttons))
+        self.assertEqual(self.win.f_flag.findData("failed"), -1)
+        callback = Mock()
+        button = self.win._menu_button("test", (("action", callback),))
+        button.menu().actions()[0].trigger()
+        callback.assert_called_once()
+
     def test_preview_and_apply_are_serialized_for_same_game(self):
         from yakupatch.writeback import ApplyPlan
         win=self.win;entered=threading.Event();release=threading.Event();written=threading.Event()

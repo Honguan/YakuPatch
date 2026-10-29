@@ -147,12 +147,23 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(label)
 
     # ---------- layout ----------
+    def _menu_button(self, title, actions):
+        button = QPushButton(tr(title))
+        menu = QMenu(button)
+        for text, slot in actions:
+            menu.addAction(tr(text), slot)
+        button.setMenu(menu)
+        return button
+
     def _build(self):
         bar = self.addToolBar(tr("主要"))
         bar.setMovable(False)
-        for text, slot in ((tr("＋加入遊戲"), self.add_game), (tr("掃描資料夾"), lambda: self.scan_folder()),
-                           (tr("重新掃描"), self.rescan), (tr("掃描資料夾清單"), self.manage_folders)):
-            bar.addAction(QAction(text, self, triggered=slot))
+        bar.addAction(QAction(tr("＋加入遊戲"), self, triggered=self.add_game))
+        bar.addWidget(self._menu_button("遊戲庫管理", (
+            ("掃描資料夾", lambda: self.scan_folder()), ("重新掃描", self.rescan),
+            ("掃描資料夾清單", self.manage_folders),
+            ("移除不需翻譯", lambda: self.remove_where(lambda r: r["no_need"], tr("不需翻譯"))),
+            ("移除不支援", lambda: self.remove_where(lambda r: r["status"] == tr("不支援"), tr("不支援"))))))
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         bar.addWidget(spacer)
@@ -176,13 +187,9 @@ class MainWindow(QMainWindow):
         for w in (QLabel(tr("遊戲庫（可按 Ctrl／Shift 多選）")), self.search, self.lib_filter, self.lib_list):
             lv.addWidget(w)
         buttons = QGridLayout()
-        for n, (text, slot) in enumerate((
-                (tr("移除不需翻譯"), lambda: self.remove_where(lambda r: r["no_need"], tr("不需翻譯"))),
-                (tr("移除不支援"), lambda: self.remove_where(lambda r: r["status"] == tr("不支援"), tr("不支援"))))):
-            buttons.addWidget(QPushButton(text, clicked=slot), n // 2, n % 2)
         self.batch_apply = QCheckBox(tr("批次翻譯完成後寫回"))
-        buttons.addWidget(QPushButton(tr("批次翻譯選取遊戲"), clicked=self.batch_translate), 1, 0)
-        buttons.addWidget(self.batch_apply, 1, 1)
+        buttons.addWidget(QPushButton(tr("批次翻譯選取遊戲"), clicked=self.batch_translate), 0, 0)
+        buttons.addWidget(self.batch_apply, 1, 0)
         lv.addLayout(buttons)
 
         right = QWidget()
@@ -253,7 +260,7 @@ class MainWindow(QMainWindow):
         for k, name in KIND.items():
             self.f_kind.addItem(tr(name), k)
         self.f_flag.addItem(tr("旗標：全部"), "")
-        for k, name in (("failed", "失敗"), ("long", "超長"), ("uncertain", "不確定"), ("inconsistent", "不一致")):
+        for k, name in (("long", "超長"), ("uncertain", "不確定"), ("inconsistent", "不一致")):
             self.f_flag.addItem(tr(name), k)
         self.query = QLineEdit(placeholderText=tr("搜尋原文或譯文"))
         self.count_label = QLabel()
@@ -290,16 +297,15 @@ class MainWindow(QMainWindow):
         self.refs_label = QLabel(wordWrap=True)
         buttons = QHBoxLayout()
         for text, slot, key in ((tr("儲存並下一句"), self.save_edit, "Ctrl+Return"),
-                                (tr("重翻此句"), self.retranslate_current, "F5"),
-                                (tr("標為已審閱"), self.mark_reviewed, None),
-                                (tr("套用到相同原文"), self.apply_same, None),
-                                (tr("重翻選取"), self.retranslate_selected, None),
-                                (tr("全文 QA"), self.run_qa, None)):
+                                (tr("重翻選取"), self.retranslate_selected, "F5"),
+                                (tr("標為已審閱"), self.mark_reviewed, None)):
             b = QPushButton(text, clicked=slot)
             if key:
                 b.setShortcut(QKeySequence(key))
                 b.setToolTip(key)
             buttons.addWidget(b)
+        buttons.addWidget(self._menu_button("更多文本操作", (
+            ("套用到相同原文", self.apply_same), ("全文 QA", self.run_qa))))
         g.addWidget(QLabel(tr("原文")), 0, 0)
         g.addWidget(self.src_label, 0, 1)
         g.addWidget(QLabel(tr("上下文")), 1, 0)
@@ -325,9 +331,10 @@ class MainWindow(QMainWindow):
             row.addWidget(QPushButton(text, clicked=slot))
         v.addLayout(row)
         row = QHBoxLayout()
-        for text, slot in ((tr("查字典"), self.gloss_lookup), (tr("VNDB 角色名單"), self.gloss_vndb),
-                           (tr("Wikidata 查譯名"), self.gloss_wikidata), (tr("字典設定"), lambda: self.open_settings(5))):
-            row.addWidget(QPushButton(text, clicked=slot))
+        row.addWidget(self._menu_button("查詢譯名", (
+            ("查字典", self.gloss_lookup), ("VNDB 角色名單", self.gloss_vndb),
+            ("Wikidata 查譯名", self.gloss_wikidata))))
+        row.addStretch()
         v.addLayout(row)
         v.addWidget(QLabel(tr("字典譯名只是候選（來源 dict:…），勾選「已確認」後才會要求翻譯使用。")))
         v.addWidget(QLabel(tr("翻譯進行中術語表為唯讀。")))
@@ -392,9 +399,11 @@ class MainWindow(QMainWindow):
         self.history.setEditTriggers(QAbstractItemView.NoEditTriggers)
         v.addWidget(self.history)
         row = QHBoxLayout()
-        for text, slot in ((tr("撤銷此次翻譯"), self.undo_run), (tr("匯出分批檔"), self.export_batches),
-                           (tr("匯入譯文"), self.import_batches), (tr("匯出分享檔"), self.export_share)):
-            row.addWidget(QPushButton(text, clicked=slot))
+        row.addWidget(self._menu_button("翻譯紀錄操作", (("撤銷此次翻譯", self.undo_run),)))
+        row.addWidget(self._menu_button("匯入／匯出", (
+            ("匯出分批檔", self.export_batches), ("匯入譯文", self.import_batches),
+            ("匯出分享檔", self.export_share))))
+        row.addStretch()
         v.addLayout(row)
         self._backend_note()
         return w
@@ -405,9 +414,10 @@ class MainWindow(QMainWindow):
         row = QHBoxLayout()
         self.preview_button = QPushButton(tr("寫回前預覽"), clicked=self.preview)
         self.apply_button = QPushButton(tr("寫回遊戲"), clicked=self.apply, enabled=False)
-        for b in (self.preview_button, self.apply_button, QPushButton(tr("還原遊戲"), clicked=self.restore),
-                  QPushButton(tr("啟動遊戲"), clicked=self.launch)):
+        for b in (self.preview_button, self.apply_button):
             row.addWidget(b)
+        row.addWidget(self._menu_button("遊戲操作", (
+            ("還原遊戲", self.restore), ("啟動遊戲", self.launch))))
         v.addLayout(row)
         self.wb_table = QTableWidget(0, 4)
         self.wb_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
