@@ -220,6 +220,36 @@ class Gui(unittest.TestCase):
         win.console_output("x" * 210000)
         self.assertLessEqual(win.activity.document().characterCount(), 200000)
 
+    def test_activity_error_filter_preserves_full_text(self):
+        win = self.win
+        text = "normal output\nERROR native failure\n工作失敗\ncompleted"
+        win.console_output(text)
+        win.activity_errors.setChecked(True)
+        block = win.activity.document().begin()
+        visible = []
+        while block.isValid():
+            if block.isVisible():
+                visible.append(block.text())
+            block = block.next()
+        self.assertEqual(visible, ["ERROR native failure", "工作失敗"])
+        self.assertEqual(win.activity.toPlainText(), text)
+        win.activity_errors.setChecked(False)
+        self.assertTrue(win.activity.document().begin().isVisible())
+
+    def test_export_activity_uses_full_saved_log(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        target = self.home / "export.log"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        export = Mock(side_effect=lambda path: path.write_text("normal\nERROR\n", encoding="utf8"))
+        self.win.capture = SimpleNamespace(log_path=self.home / "source.log", export=export)
+        self.win.activity_errors.setChecked(True)
+        with patch("yakupatch.gui.window.QFileDialog.getSaveFileName", return_value=(str(target), "")):
+            self.win.export_activity()
+            self.idle()
+        export.assert_called_once_with(target)
+        self.assertEqual(target.read_text(encoding="utf8"), "normal\nERROR\n")
+
     def test_preview_and_apply_are_serialized_for_same_game(self):
         from yakupatch.writeback import ApplyPlan
         win=self.win;entered=threading.Event();release=threading.Event();written=threading.Event()

@@ -175,7 +175,19 @@ class MainWindow(QMainWindow):
         self.activity = QPlainTextEdit(readOnly=True)
         self.activity.document().setMaximumBlockCount(2000)
         dock = QDockWidget(tr("工作紀錄（與命令視窗同步）"), self)
-        dock.setWidget(self.activity)
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        controls = QHBoxLayout()
+        self.activity_errors = QCheckBox(tr("只看錯誤"))
+        self.activity_errors.toggled.connect(self._filter_activity)
+        controls.addWidget(self.activity_errors)
+        controls.addStretch()
+        controls.addWidget(QPushButton(tr("匯出完整紀錄"), clicked=self.export_activity))
+        layout.addLayout(controls)
+        self.activity_path = QLabel(textInteractionFlags=Qt.TextSelectableByMouse, wordWrap=True)
+        layout.addWidget(self.activity_path)
+        layout.addWidget(self.activity)
+        dock.setWidget(panel)
         self.addDockWidget(Qt.BottomDockWidgetArea, dock)
         dock.hide()
         action = dock.toggleViewAction()
@@ -461,6 +473,7 @@ class MainWindow(QMainWindow):
                 message += f" — {job.error}"
             if not getattr(self, "console_capture", False):
                 self.activity.appendPlainText(message)
+                self._filter_activity()
             print(message, flush=True)
         if job.state in ("done", "failed", "paused", "cancelled") and job in self.callbacks:
             self.callbacks.pop(job)(job)
@@ -524,6 +537,37 @@ class MainWindow(QMainWindow):
             cursor.removeSelectedText()
         if follow:
             bar.setValue(bar.maximum())
+        if self.activity_errors.isChecked():
+            self._filter_activity()
+
+    def _filter_activity(self):
+        only_errors = self.activity_errors.isChecked()
+        document = self.activity.document()
+        block = document.begin()
+        while block.isValid():
+            text = block.text().lower()
+            block.setVisible(not only_errors or any(word in text for word in
+                             ("error", "exception", "traceback", "fatal", "failed", "錯誤", "失敗", "異常",
+                              "object reference", "sequence contains", "given key", "duplicate key")))
+            block = block.next()
+        document.markContentsDirty(0, document.characterCount())
+        self.activity.viewport().update()
+
+    def export_activity(self):
+        capture = getattr(self, "capture", None)
+        if capture is None:
+            QMessageBox.information(self, "YakuPatch", tr("尚無自動儲存紀錄"))
+            return
+        filename, _ = QFileDialog.getSaveFileName(self, tr("匯出完整工作紀錄"),
+                                                 str(Path.home() / capture.log_path.name), "Log (*.log)")
+        if not filename:
+            return
+
+        def done(job):
+            if not self._error(job, tr("匯出紀錄失敗")):
+                self.statusBar().showMessage(tr("紀錄已匯出：{}").format(filename), 10000)
+
+        self.run_bg(lambda job: capture.export(Path(filename)), done, tr("匯出工作紀錄"))
 
     def _error(self, job, what) -> bool:
         if job.error is None:

@@ -4,11 +4,19 @@ import io
 import os
 import sys
 import threading
+import shutil
+import uuid
+from datetime import datetime
 from collections import deque
 
 
 class ConsoleCapture:
     def __init__(self):
+        from ..extract import projects_home
+        folder = projects_home().parent / "logs"
+        folder.mkdir(parents=True, exist_ok=True)
+        self.log_path = folder / f"gui-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}.log"
+        self.log = self.log_path.open("xb", buffering=0)
         self.pending = deque(maxlen=256)
         self.lock = threading.Lock()
         self.dropped = 0
@@ -57,13 +65,13 @@ class ConsoleCapture:
                 data = os.read(fd, 8192)
                 if not data:
                     break
+                self._queue(decoder.decode(data))
                 try:
                     remaining = data
                     while remaining:
                         remaining = remaining[os.write(console, remaining):]
                 except OSError:
                     pass
-                self._queue(decoder.decode(data))
             self._queue(decoder.decode(b"", final=True))
         finally:
             os.close(fd)
@@ -72,6 +80,12 @@ class ConsoleCapture:
     def _queue(self, text):
         if text:
             with self.lock:
+                if not getattr(self, "log_error", None):
+                    try:
+                        self.log.write(text.encode("utf-8"))
+                    except OSError as ex:
+                        self.log_error = str(ex)
+                        text = f"\n[紀錄寫入失敗：{ex}；請檢查磁碟空間]\n" + text
                 if len(self.pending) == self.pending.maxlen:
                     self.dropped += 1
                 self.pending.append(text)
@@ -82,6 +96,14 @@ class ConsoleCapture:
             self.dropped = 0
             chunks = [self.pending.popleft() for _ in range(min(8, len(self.pending)))]
         return warning + "".join(chunks)
+
+    def export(self, path):
+        if path.resolve() == self.log_path.resolve():
+            raise ValueError("請選擇不同的匯出路徑，避免覆蓋目前紀錄")
+        with self.lock:
+            if getattr(self, "log_error", None):
+                raise OSError(f"紀錄不完整：{self.log_error}")
+            shutil.copyfile(self.log_path, path)
 
     def close(self):
         if self.closed:
@@ -97,3 +119,5 @@ class ConsoleCapture:
             stream.close()
         for *_, thread in self.streams:
             thread.join(timeout=2)
+        if not any(thread.is_alive() for *_, thread in self.streams):
+            self.log.close()

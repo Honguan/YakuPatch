@@ -1,6 +1,7 @@
 """PySide6 GUI (PROJECT_PLAN §11). It only calls yakupatch.core and listens to Store change events."""
 import faulthandler
 import sys
+import traceback
 from pathlib import Path
 
 
@@ -15,6 +16,10 @@ def main() -> int:
     capture = ConsoleCapture()
     try:
         return _run(capture)
+    except BaseException:
+        with capture.lock:
+            capture.log.write(traceback.format_exc().encode("utf-8", errors="replace"))
+        raise
     finally:
         faulthandler.disable()
         capture.close()
@@ -22,7 +27,7 @@ def main() -> int:
 
 
 def _run(capture) -> int:
-    faulthandler.enable(sys.stderr)
+    faulthandler.enable(capture.log)
     print("Loading the GUI toolkit (PySide6)...", flush=True)
     from PySide6.QtCore import QTimer
     from PySide6.QtGui import QIcon
@@ -36,6 +41,8 @@ def _run(capture) -> int:
     app.setWindowIcon(QIcon(str(Path(__file__).with_name("icon.ico"))))
     window = MainWindow()
     window.console_capture = True
+    window.capture = capture
+    window.activity_path.setText(str(capture.log_path))
     timer = QTimer(app, interval=100, timeout=lambda: window.console_output(capture.drain()))
     timer.start()
     window.show()
