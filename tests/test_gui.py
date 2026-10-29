@@ -212,6 +212,14 @@ class Gui(unittest.TestCase):
             self.assertIn("#7 提取：失敗", win.activity.toPlainText())
             self.assertIn("test failure", win.activity.toPlainText())
 
+    def test_console_chunks_keep_partial_lines_and_limit_large_lines(self):
+        win = self.win
+        win.console_output("原生錯")
+        win.console_output("誤\n下一行")
+        self.assertEqual(win.activity.toPlainText(), "原生錯誤\n下一行")
+        win.console_output("x" * 210000)
+        self.assertLessEqual(win.activity.document().characterCount(), 200000)
+
     def test_preview_and_apply_are_serialized_for_same_game(self):
         from yakupatch.writeback import ApplyPlan
         win=self.win;entered=threading.Event();release=threading.Event();written=threading.Event()

@@ -7,7 +7,7 @@ import urllib.request
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QColor, QKeySequence, QShortcut, QTextCursor
 from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QDialog, QDockWidget, QFileDialog, QFormLayout, QGridLayout,
                                QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem,
@@ -459,7 +459,8 @@ class MainWindow(QMainWindow):
             message = f"[{time.strftime('%H:%M:%S')}] #{getattr(job, 'gui_number', '—')} {job.label}：{tr(state)}"
             if getattr(job, "error", None):
                 message += f" — {job.error}"
-            self.activity.appendPlainText(message)
+            if not getattr(self, "console_capture", False):
+                self.activity.appendPlainText(message)
             print(message, flush=True)
         if job.state in ("done", "failed", "paused", "cancelled") and job in self.callbacks:
             self.callbacks.pop(job)(job)
@@ -507,6 +508,22 @@ class MainWindow(QMainWindow):
         elif not p:
             bits.append(tr("進行中"))
         return " · ".join(bits)
+
+    def console_output(self, text):
+        if not text:
+            return
+        bar = self.activity.verticalScrollBar()
+        follow = bar.value() == bar.maximum()
+        cursor = QTextCursor(self.activity.document())
+        cursor.movePosition(QTextCursor.End)
+        cursor.insertText(text)
+        excess = self.activity.document().characterCount() - 200000
+        if excess > 0:
+            cursor.movePosition(QTextCursor.Start)
+            cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, excess)
+            cursor.removeSelectedText()
+        if follow:
+            bar.setValue(bar.maximum())
 
     def _error(self, job, what) -> bool:
         if job.error is None:
