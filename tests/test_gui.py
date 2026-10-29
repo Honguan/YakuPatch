@@ -38,6 +38,14 @@ def wait(cond, timeout=10):
 
 @unittest.skipIf(QApplication is None, "PySide6 not installed")
 class Launch(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        env = patch.dict(os.environ, {"YAKUPATCH_HOME": folder.name})
+        env.start()
+        self.addCleanup(env.stop)
+
     def test_main_shows_window(self):
         from yakupatch import gui
         with patch("yakupatch.gui.window.MainWindow") as win, patch.object(QApplication, "exec", return_value=0):

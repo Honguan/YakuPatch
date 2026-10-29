@@ -2,6 +2,15 @@ import json,os,subprocess,sys,unittest
 
 
 class Console(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        from unittest.mock import patch
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        env = patch.dict(os.environ, {"YAKUPATCH_HOME": folder.name})
+        env.start()
+        self.addCleanup(env.stop)
+
     def test_history_search_scans_beyond_display_limit(self):
         import tempfile
         from pathlib import Path
