@@ -16,7 +16,7 @@ from threading import Lock
 
 from .. import clr
 from ..backup import Backup
-from .base import EnginePlugin, Segment
+from .base import EnginePlugin, Segment, LangPack
 
 _JA = re.compile(r"[぀-ヿ]")
 _CJK = re.compile(r"[一-鿿]")
@@ -405,6 +405,12 @@ def _bundles(game_dir: Path) -> list[Path]:
     return sorted(_data_dir(game_dir).glob(_NANI))
 
 
+def _localization_bundles(game_dir: Path) -> list[Path]:
+    # Only small YooAsset table bundles are probed; large media bundles are not localization inputs.
+    return sorted(p for p in _data_dir(game_dir).glob("StreamingAssets/res/*/*.bundle")
+                  if p.stat().st_size <= 16 << 20)
+
+
 def _load(rel: str, raw: bytes):
     """(file to save, serialized file holding the objects): the same file, or an AssetBundle and its first member."""
     import UnityPy
@@ -573,6 +579,39 @@ class Unity(EnginePlugin):
     version = "1.0.0"
     control_codes = [r"<[^<>]*>", r"\{[^{}]*\}"]          # TMP / Utage rich text tags, format arguments
 
+    def language_packs(self, game_dir: Path) -> list[LangPack]:
+        import UnityPy
+        tables = {}
+        for path in _localization_bundles(game_dir):
+            try:
+                raw = path.read_bytes()
+                if not raw:
+                    continue
+                key = raw[0] ^ ord("U")
+                if bytes(v ^ key for v in raw[:8]) != b"UnityFS\0":
+                    continue
+                if key:
+                    raw = raw.translate(bytes(v ^ key for v in range(256)))
+                for obj in UnityPy.load(raw).objects:
+                    if obj.type.name != "TextAsset":
+                        continue
+                    asset = obj.read()
+                    if asset.m_Name not in ("LocalizationLabelTable", "LocalizationDialogTable"):
+                        continue
+                    rows = json.loads(asset.m_Script)
+                    if not isinstance(rows, list) or len(rows) < 20 or not all(isinstance(r, dict) for r in rows):
+                        continue
+                    tables[asset.m_Name] = (path, {lang for field, lang in (("ch", "zh-Hans"), ("tr_ch", "zh-Hant"))
+                        if sum(isinstance(r.get(field), str) and bool(_CJK.search(r[field])) for r in rows) >= len(rows) * .9})
+            except (ValueError, EOFError, KeyError, IndexError, struct.error) as ex:
+                print(f"[Unity 語言預檢失敗] {path}：{ex}", flush=True)
+        if len(tables) != 2:
+            return []
+        labels, dialogue = tables["LocalizationLabelTable"], tables["LocalizationDialogTable"]
+        return [LangPack(lang, dialogue[0].relative_to(game_dir).as_posix(),
+                         f"內建{'繁體' if lang == 'zh-Hant' else '簡體'}中文（已驗證介面與對話表），請在遊戲語言設定切換")
+                for lang in sorted(labels[1] & dialogue[1])]
+
     def detect(self, game_dir: Path) -> float:
         return 1.0 if _data_dir(game_dir) is not None and (game_dir / "UnityPlayer.dll").is_file() else 0.0
 
@@ -588,7 +627,8 @@ class Unity(EnginePlugin):
             digest.update(source.relative_to(root).as_posix().encode() + b"\0")
             digest.update(hashlib.sha256(source.read_bytes().replace(b"\r\n", b"\n")).digest())
         data = _data_dir(game_dir)
-        paths = set(_files(game_dir) + _bundles(game_dir) + list((data / "Managed").glob("*.dll")))
+        paths = set(_files(game_dir) + _bundles(game_dir) + _localization_bundles(game_dir)
+                    + list((data / "Managed").glob("*.dll")))
         paths.update(p for p in (game_dir / "GameAssembly.dll", data / "il2cpp_data/Metadata/global-metadata.dat")
                      if p.is_file())
         backup = Backup(game_dir)
