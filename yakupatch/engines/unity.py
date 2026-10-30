@@ -582,10 +582,10 @@ class Unity(EnginePlugin):
         for path in sorted(paths):
             rel = path.relative_to(game_dir).as_posix()
             digest.update(rel.encode() + b"\0")
-            with path.open("rb") as stream:
-                digest.update(hashlib.file_digest(stream, "sha256").digest())
+            st = path.stat()                       # size + mtime: rescans must not read gigabytes of assets
+            digest.update(f"{st.st_size}:{st.st_mtime_ns}".encode())
             if rel in backup.files:
-                digest.update(hashlib.sha256(backup.original_bytes(rel)).digest())
+                digest.update(str(backup.files[rel].get("orig_sha")).encode())
         fingerprint = digest.hexdigest()
         key = str(game_dir.resolve())
         if _scan_fingerprints.get(key) != fingerprint:

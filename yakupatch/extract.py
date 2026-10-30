@@ -94,7 +94,7 @@ def extract(game_dir: Path, plugin: EnginePlugin, store: Store, force: bool = Fa
     seed_glossary(store.dir, records)                                     # E10
     manifest = {"format": FORMAT, "game_dir": str(game_dir), "engine": plugin.name,
                 "plugin_version": plugin.version, "source_lang": "ja", "target_lang": "",
-                "language_probe": lang, "files": files}
+                "language_probe": lang, "files": files, "forced": force}
     store.replace(merge(store.records, records), {**store.manifest, **manifest})   # E11
     return lang
 

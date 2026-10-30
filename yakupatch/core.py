@@ -84,6 +84,8 @@ def _chinese_probe(entry: dict, manifest: dict) -> dict:
 
 def translation_blocked(game: Path, plugin, store: Store) -> bool:
     entry = Library().games.get(str(Path(game).resolve()))
+    if store.manifest.get("forced"):                 # 「仍要翻譯」: only the user's own Chinese mark still blocks
+        return bool((entry or {}).get("builtin_chinese"))
     # A scanned game's probe already lists its language packs; only unscanned games need the slow engine check.
     return bool(_chinese_probe(entry or {}, store.manifest) or (entry is None and plugin.language_packs(game)))
 
@@ -462,7 +464,7 @@ class Library:
         plugin = next(p for p in engines.PLUGINS if p.name == e["engine"])
         project = store.dir if store is not None else project_dir(game, plugin, home)
         store = store if store is not None else Store(project)
-        probe = _chinese_probe(e, store.manifest)
+        probe = {} if store.manifest.get("forced") else _chinese_probe(e, store.manifest)
         if probe:
             row.update(no_need=True, reason=_probe_text(probe),
                        lang=LANG["packs"] if probe.get("packs") else LANG.get(probe["primary"], probe["primary"]))

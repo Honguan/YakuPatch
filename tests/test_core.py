@@ -285,6 +285,19 @@ class CoreApi(unittest.TestCase):
             self.assertEqual(cli.main(["--home", str(self.home), "translate", str(self.game)]), 1)
             self.assertEqual(cli.main(["--home", str(self.home), "extract", str(self.game)]), 2)
 
+    def test_forced_extraction_allows_translation_unless_user_marked_chinese(self):
+        lib = core.Library()
+        key = lib.add(self.game)[0]
+        chinese = {"primary": "zh-Hant", "packs": []}
+        self.store.replace(self.store.records, {**self.store.manifest, "language_probe": chinese, "forced": True})
+        self.assertFalse(core.translation_blocked(self.game, self.plugin, self.store))
+        self.assertFalse(lib.row(key, self.home)["no_need"])
+        lib.set_builtin_chinese(key, True)
+        self.assertTrue(core.translation_blocked(self.game, self.plugin, self.store))
+        self.store.replace(self.store.records, {**self.store.manifest, "forced": False})
+        lib.set_builtin_chinese(key, False)
+        self.assertTrue(core.translation_blocked(self.game, self.plugin, self.store))
+
     def test_batch_skips_builtin_chinese_even_if_already_extracted(self):
         from yakupatch.engines.base import LangPack
         with patch.object(self.plugin, "language_packs", return_value=[LangPack("zh", "scenario/zh", "中文")]), \

@@ -175,9 +175,9 @@ class TypeTree(unittest.TestCase):
             self.assertEqual(plugin.scan_fingerprint(game), first)
             stat = dll.stat()
             dll.write_bytes(b"two")
-            os.utime(dll, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+            os.utime(dll, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10**9))
             changed = plugin.scan_fingerprint(game)
-            self.assertNotEqual(changed, first)           # same size and timestamp still invalidates
+            self.assertNotEqual(changed, first)           # same size, newer timestamp invalidates
             from yakupatch.engines.unity import _contexts
             _contexts[str(game.resolve())] = object()
             self.assertEqual(plugin.scan_fingerprint(game), changed)
@@ -195,7 +195,8 @@ class TypeTree(unittest.TestCase):
             backup.set_patched(rel, b"patched")
             backup.save()
             backed = plugin.scan_fingerprint(game)
-            (backup.dir / "files" / rel).write_bytes(b"edited original")
+            backup.ensure(rel, b"updated original")      # a game update replaces the backed-up original
+            backup.save()
             self.assertNotEqual(plugin.scan_fingerprint(game), backed)
 
     def test_stripped_reference_types_preserve_metadata_and_reject_bad_payloads(self):
