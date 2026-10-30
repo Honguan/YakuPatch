@@ -4,6 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+
+import helpers  # noqa: F401  (redirects temp folders and cleans them up)
 from yakupatch import core, engines, qa, writeback
 from yakupatch.backends.codex import Codex, CodexConfig
 from yakupatch.exchange import Store

@@ -92,60 +92,7 @@ def _metadata(raw: bytes) -> bytes:
                 if not heap.endswith(b"\0") or b".dll\0" not in heap:
                     continue
                 return bytes(v ^ key[i % size] for i, v in enumerate(raw))
-    if len(raw) >= 392:
-        return _shuffled_metadata(raw)
     raise ValueError("IL2CPP metadata 格式無法識別，或 XOR 編碼內容已損壞")
-
-
-def _shuffled_metadata(raw: bytes) -> bytes:
-    """HypnoApp2's v29 layout: header permutation/biases and seven byte-XOR sections."""
-    h = struct.unpack("<98I", bytes(v ^ ((i + 194) & 255) for i, v in enumerate(raw[:392])))
-    # (offset field, offset bias, size field, XOR direction, record size), in standard v29 order.
-    layout = (
-        (0x44, -60, 0x3c, 1, 8), (0x15c, 20, 0x16c, 1, 1), (0x58, -20, 0xc4, -1, 1),
-        (0x164, -52, 0x50, 0, 24), (0xcc, -44, 0x114, -1, 20), (0x138, -16, 0x10c, 1, 32),
-        (0x90, -40, 0x70, 0, 12), (0x14, -40, 0xe0, 0, 12), (0xa8, -56, 0xd4, 0, 1),
-        (0xd8, -20, 0x30, 0, 12), (0x17c, -52, 0xc8, 0, 12), (0x8c, -64, 0xec, -1, 12),
-        (0xc, 44, 0x74, 0, 16), (0x1c, -56, 0x80, 0, 4), (0x88, 52, 0xb0, 0, 16),
-        (0x24, 44, 0x12c, 0, 4), (0x78, 52, 0x148, 0, 4), (0xd0, -64, 0x34, 0, 4),
-        (0x6c, 44, 0x178, 0, 8), (0x94, -28, 0x98, 0, 88), (0x140, -52, 0x4c, 0, 40),
-        (4, -44, 0x150, 1, 64), (0x54, -20, 0x2c, 0, 8), (8, -24, 0x130, 0, 4),
-        (0x144, 36, 0x7c, 0, 1), (0x84, 48, 0x108, 0, 8), (0x128, -56, 0x5c, 0, 4),
-        (0xb4, 24, 0x60, 0, 8), (0x160, -28, 0x110, 0, 8), (0x134, 48, 0x104, 0, 1),
-        (0xf8, 36, 0x40, 0, 4),
-    )
-    sections, end = [], 392
-    error = "IL2CPP 重排中繼資料的區段、索引或編碼不符"
-    for offset, bias, count, sign, stride in layout:
-        start, size = h[offset // 4] + bias, h[count // 4]
-        if not (end <= start <= end + 7 and start <= len(raw) and size <= len(raw) - start and size % stride == 0):
-            raise ValueError(error)
-        sections.append((start, size))
-        end = start + size
-    out = bytearray(raw)
-    for (start, size), (_, _, _, sign, _) in zip(sections, layout):
-        if sign:
-            key = sign * (size - 127)
-            out[start:start + size] = bytes(v ^ ((i + key) & 255) for i, v in enumerate(raw[start:start + size]))
-    start, size = sections[2]
-    heap = out[start:start + size]
-    if not heap.endswith(b"\0") or b".dll\0" not in heap:
-        raise ValueError(error)
-    start, size = sections[20]
-    images = list(struct.iter_unpack("<10i", out[start:start + size]))
-    if not images or len(images) != sections[21][1] // 64:
-        raise ValueError(error)
-    for name, assembly, first, count, exported, exports, *_ in images:
-        if not (0 <= name < len(heap) and 0 <= assembly < len(images)
-                and count >= 0 and first >= -1 and (first >= 0 or count == 0) and first + count <= sections[19][1] // 88
-                and exports >= 0 and exported >= -1 and (exported >= 0 or exports == 0)
-                and exported + exports <= sections[30][1] // 4):
-            raise ValueError(error)
-    if max((r[4] + r[5] for r in images if r[4] >= 0), default=0) * 4 != sections[30][1]:
-        raise ValueError(error)
-    header = [0xFAB11BAF, 29, *(value for pair in sections for value in pair)]
-    struct.pack_into("<64I", out, 0, *header)
-    return bytes(out)
 
 
 def _type_nodes(nodes: list, empty_refs: bool = False):

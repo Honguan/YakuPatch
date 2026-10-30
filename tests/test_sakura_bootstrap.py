@@ -10,6 +10,8 @@ import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+
+import helpers  # noqa: F401  (redirects temp folders and cleans them up)
 from yakupatch import sakura_kit as kit
 
 

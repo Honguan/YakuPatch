@@ -51,13 +51,13 @@ def _run(capture) -> int:
     timer = QTimer(app, interval=100, timeout=lambda: window.console_output(capture.drain()))
     timer.start()
     window.show()
-    print("GUI 已開啟：操作請使用主視窗；工具列「工作紀錄」與此視窗同步顯示工作狀態。", flush=True)
-    print("原生元件與錯誤輸出也會顯示在 GUI 工作紀錄。命令視窗可最小化；關閉它仍會關閉 YakuPatch。", flush=True)
+    print("Main window is open. The toolbar's job log mirrors this console.", flush=True)
+    print("You can minimize this console window; closing it also closes YakuPatch.", flush=True)
     window.check_update()
     window.autostart_sakura()
     try:
         result = app.exec()
     finally:
         timer.stop()
-    print(f"YakuPatch GUI 已結束（代碼 {result}）。", flush=True)
+    print(f"YakuPatch GUI exited (code {result}).", flush=True)
     return result

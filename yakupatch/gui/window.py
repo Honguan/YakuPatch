@@ -228,9 +228,8 @@ class MainWindow(QMainWindow):
         for w in (QLabel(tr("遊戲庫（可按 Ctrl／Shift 多選）")), self.search, self.lib_filter, self.lib_list):
             lv.addWidget(w)
         buttons = QGridLayout()
-        self.batch_apply = QCheckBox(tr("批次翻譯完成後寫回"))
-        buttons.addWidget(QPushButton(tr("批次翻譯選取遊戲"), clicked=self.batch_translate), 0, 0)
-        buttons.addWidget(self.batch_apply, 1, 0)
+        buttons.addWidget(QPushButton(tr("批次翻譯選取遊戲"), clicked=lambda: self.batch_translate()), 0, 0)
+        buttons.addWidget(QPushButton(tr("一鍵提取→翻譯→寫回"), clicked=lambda: self.batch_translate(apply=True)), 1, 0)
         lv.addLayout(buttons)
 
         right = QWidget()
@@ -856,9 +855,8 @@ class MainWindow(QMainWindow):
         if self.key == key:
             self._refresh_counts()
 
-    def batch_translate(self):
+    def batch_translate(self, apply=False):
         """F16: extract → translate → optionally apply each selected game, in one queued job."""
-        apply = self.batch_apply.isChecked()
         keys = [i.data(Qt.UserRole) for i in self.lib_list.selectedItems()]
         if not keys and self.lib_list.currentItem():
             keys = [self.lib_list.currentItem().data(Qt.UserRole)]

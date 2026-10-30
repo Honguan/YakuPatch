@@ -8,6 +8,8 @@ from importlib import metadata
 from pathlib import Path
 from unittest import mock
 
+
+import helpers  # noqa: F401  (redirects temp folders and cleans them up)
 from yakupatch import core, depcheck
 
 ROOT = Path(__file__).resolve().parent.parent
