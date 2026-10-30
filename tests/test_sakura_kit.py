@@ -128,6 +128,33 @@ class SakuraKit(unittest.TestCase):
             kit.install_llama("cpu", self.tmp / "llama")
         self.assertFalse((self.tmp / "evil.exe").exists())
 
+    def test_install_llama_counts_only_complete_installs(self):
+        def archive(name):
+            data = io.BytesIO()
+            with zipfile.ZipFile(data, "w") as z:
+                z.writestr(name, "x")
+            return data.getvalue()
+        assets = [{"name": "llama-b2-bin-win-cuda-12.4-x64.zip", "size": 1, "browser_download_url": "http://x/main"},
+                  {"name": "cudart-llama-bin-win-cuda-12.4-x64.zip", "size": 1, "browser_download_url": "http://x/rt"}]
+        paused = [True]
+
+        def fake_download(url, dest, sha256="", progress=None, stop=None):
+            if url.endswith("rt") and paused[0]:
+                raise InterruptedError("paused")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(archive("llama-server.exe" if url.endswith("main") else "cudart64_12.dll"))
+            return dest
+        target = self.tmp / "llama"
+        with patch.object(kit, "llama_release", return_value=("b2", assets)), \
+                patch.object(kit, "download", fake_download), patch.object(kit, "home", return_value=self.tmp):
+            with self.assertRaises(InterruptedError):
+                kit.install_llama("cuda", target)
+            self.assertIsNone(kit.server_exe(target))            # the server alone does not count as installed
+            paused[0] = False
+            self.assertEqual(kit.install_llama("cuda", target), target)
+        self.assertTrue((target / "cudart64_12.dll").exists())
+        self.assertFalse(target.with_name("llama.partial").exists())
+
     def test_catalogue_is_fetched_once_until_refreshed(self):
         tree = [{"path": "m.gguf", "size": 5, "lfs": {"oid": "ab"}}, {"path": "README.md", "size": 1}]
         kit.catalogue.cache_clear()

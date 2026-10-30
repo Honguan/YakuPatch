@@ -186,14 +186,18 @@ def cache_key(work: Work, backend, terms: dict) -> str:
     return hashlib.sha256(json.dumps(data, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
-def cache_get(store: Store, key: str) -> str | None:
+def cache_get_many(store: Store, keys) -> dict[str, str]:
+    """One connection for the whole lookup: opening one per line took ~25 s for 30k lines."""
     # shortcut: project cache only, add a shared cache when cross-project reuse has explicit isolation rules.
-    path = store.dir / "cache.sqlite3"
-    if not path.exists():
-        return None
+    path, keys, found = store.dir / "cache.sqlite3", list(dict.fromkeys(keys)), {}
+    if not path.exists() or not keys:
+        return found
     with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)) as conn:
-        row = conn.execute("SELECT dst FROM translations WHERE key = ?", (key,)).fetchone()
-    return row[0] if row else None
+        for i in range(0, len(keys), 500):                  # stay under SQLite's bound-parameter limit
+            chunk = keys[i:i + 500]
+            found.update(conn.execute(f"SELECT key, dst FROM translations WHERE key IN ({','.join('?' * len(chunk))})",
+                                      chunk).fetchall())
+    return found
 
 
 def estimate(store: Store, codes: list[str], backend, limit=None, only=None, fresh=False) -> dict:
@@ -201,8 +205,10 @@ def estimate(store: Store, codes: list[str], backend, limit=None, only=None, fre
     terms = glossary(store)
     use_style(store, backend)
     works = work_list(store, rows, codes, terms)
-    hits = 0 if fresh else sum(cache_get(store, cache_key(w, backend, terms)) is not None for w in works)
-    pending = works if fresh else [w for w in works if cache_get(store, cache_key(w, backend, terms)) is None]
+    keys = {w.id: cache_key(w, backend, terms) for w in works}
+    cached = {} if fresh else cache_get_many(store, keys.values())
+    pending = [w for w in works if keys[w.id] not in cached]
+    hits = len(works) - len(pending)
     groups = batches(pending, backend, terms, store)
     extra_in = extra_out = 0
     if backend.caps.summary and backend.caps.io_format == "json_ids":   # F14: about one summary call per wave
@@ -406,13 +412,15 @@ def run(store: Store, codes: list[str], backend, limit=None, progress=None, slee
                         break
                     futures, keys = [], {}
                     wave = groups[start:start + backend.caps.max_parallel]
-                    for group in wave:
-                        refreshed = work_list(store, [store.records[w.id] for w in group], codes, terms)
+                    refreshed = [work_list(store, [store.records[w.id] for w in group], codes, terms) for group in wave]
+                    for w in (w for group in refreshed for w in group):
+                        w.summary = story.get(store.records[w.id]["refs"][0]["file"], "")
+                        keys[w.id] = cache_key(w, backend, terms)
+                    stored = {} if fresh else cache_get_many(store, keys.values())
+                    for group in refreshed:
                         pending = []
-                        for w in refreshed:
-                            w.summary = story.get(store.records[w.id]["refs"][0]["file"], "")
-                            keys[w.id] = cache_key(w, backend, terms)
-                            cached = None if fresh else cache_get(store, keys[w.id])
+                        for w in group:
+                            cached = stored.get(keys[w.id])
                             if cached is not None and not translate.validate(w.text, cached, w.masks,
                                                                              getattr(backend.config, "repeat_threshold", 4)):
                                 w.result = cached

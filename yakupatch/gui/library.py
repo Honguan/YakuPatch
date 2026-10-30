@@ -96,7 +96,7 @@ class LibraryMixin:
             return
         current = self.key
         rows = []
-        for key in self.lib.games:
+        for key in list(self.lib.games):   # snapshot: a scan may add games meanwhile
             try:
                 row = self._row(key)
             except (OSError, ValueError, StopIteration) as ex:

@@ -45,7 +45,7 @@ class Backup:
         """The unpatched file: the backup copy while our patch is in place, else the current file."""
         current = read_bytes(self.game, rel)
         e = self.files.get(rel)
-        if e and not e.get("created") and sha256(current) == e["patched_sha"] and e["patched_sha"] != e["orig_sha"]:
+        if e and not e.get("created") and self.is_patched(e, sha256(current)):
             return read_bytes(self.dir, f"files/{rel}")
         return current
 
@@ -54,9 +54,14 @@ class Backup:
         e = self.files.get(rel)
         if e and e.get("head"):
             current = read_head(safe_path(self.game, rel), e["head"])
-            if sha256(current) == e["patched_sha"] and e["patched_sha"] != e["orig_sha"]:
+            if self.is_patched(e, sha256(current)):
                 return read_bytes(self.dir, f"files/{rel}")
         return None
+
+    @staticmethod
+    def is_patched(e: dict, current: str | None) -> bool:
+        """Our patch is in place: the recorded one, or the one a writeback was writing when it was cut off."""
+        return current is not None and current != e["orig_sha"] and current in (e["patched_sha"], e.get("pending_sha"))
 
     def is_created(self, rel: str) -> bool:
         return bool(self.files.get(rel, {}).get("created"))
@@ -78,8 +83,14 @@ class Backup:
     def drop(self, rel: str) -> None:
         self.files.pop(rel, None)
 
+    def set_pending(self, rel: str, data: bytes) -> None:
+        """Recorded and saved before the write, so a crash mid-write still leaves the file restorable."""
+        self.files[rel]["pending_sha"] = sha256(data)
+        self.save()
+
     def set_patched(self, rel: str, data: bytes) -> None:
         self.files[rel]["patched_sha"] = sha256(data)
+        self.files[rel].pop("pending_sha", None)
 
     def save(self) -> None:
         atomic_write(self.dir / "manifest.json",
@@ -93,7 +104,7 @@ class Backup:
                 current = sha256(path.read_bytes()) if path.exists() else None
                 if current is None:
                     results.append((rel, "original"))
-                elif current == e["patched_sha"]:
+                elif current in (e["patched_sha"], e.get("pending_sha")):
                     remove_created(path)
                     _prune(path.parent, self.game)
                     results.append((rel, "removed"))
@@ -108,7 +119,7 @@ class Backup:
                 current = None
             if current == e["orig_sha"]:
                 results.append((rel, "original"))
-            elif current == e["patched_sha"]:
+            elif self.is_patched(e, current):
                 data = read_bytes(self.dir, f"files/{rel}")
                 if sha256(data) != e["orig_sha"]:
                     raise RuntimeError(f"備份檔已損毀：{rel}")

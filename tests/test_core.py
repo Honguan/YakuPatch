@@ -181,6 +181,30 @@ class CoreApi(unittest.TestCase):
             lib._add(roots)
             self.assertEqual(detect.call_count, 4)
 
+    def test_library_keeps_gui_changes_made_during_a_scan(self):
+        import threading
+        lib = core.Library()
+        lib.games["Z:/other"] = {"engine": "rpgmaker-mz"}
+        key, started, release = str(self.game), threading.Event(), threading.Event()
+        lib.games[key] = {"engine": self.plugin.name}
+
+        def slow_detect(game, plugin):
+            started.set()
+            release.wait(10)
+            return {"lang": "ja", "probe": {}, "unsupported": ""}
+        with patch.object(core, "_detect", slow_detect):
+            worker = threading.Thread(target=lib._add, args=([(self.game, self.plugin)],))
+            worker.start()
+            self.assertTrue(started.wait(10))
+            lib.set_builtin_chinese(key, True)                  # the GUI acts while detection runs
+            lib.remove("Z:/other")
+            release.set()
+            worker.join(10)
+        saved = core.Library().games
+        self.assertNotIn("Z:/other", saved)
+        self.assertTrue(saved[key]["builtin_chinese"])
+        self.assertEqual(saved[key]["lang"], "ja")
+
     def test_library_remembers_folders_and_survives_a_bad_game(self):
         lib = core.Library()
         parent = Path(tempfile.mkdtemp(prefix="yakupatch-lib-")).resolve()
