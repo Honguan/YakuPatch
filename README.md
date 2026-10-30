@@ -16,11 +16,12 @@
 
 * **直接處理遊戲，不必另找提取工具**
   * 🎮 **8 種引擎**：自動偵測引擎，提取文本、翻譯、寫回一次完成。
-  * 🛡️ **安全可還原**：寫回前先備份，一鍵還原；每次翻譯都能單獨撤銷。
+  * 🛡️ **安全可還原**：寫回前先備份，一鍵還原；寫回途中當機或關閉視窗也能還原；每次翻譯都能單獨撤銷。
   * 📚 **批次處理**：在遊戲庫多選後按「批次翻譯選取遊戲」依序處理多款遊戲；按「一鍵提取→翻譯→寫回」則翻譯完直接寫回遊戲；翻譯分頁會顯示整體、批次和提取／翻譯／寫回各階段的進度條。
   * 🗂️ **遊戲庫管理**：掃描過的資料夾會記住，可一鍵「重新掃描」；可一次移除「不需翻譯」或「不支援」的遊戲。
   * 🤝 **分享譯文**：匯出只含譯文的分享檔（不含遊戲原文），對方用「匯入譯文」即可套用到同一款遊戲。
-  * 🈶 **已是中文就停下**：遊戲已是中文或內建中文語言包時，不會重複翻譯。
+  * 🈶 **已是中文就停下**：遊戲已是中文或內建中文語言包時，不會重複翻譯；確定要翻時按「仍要翻譯」。
+  * 🩺 **工作紀錄與異常回報**：工具列「工作紀錄」即時顯示所有輸出；上次異常結束時，下次啟動會提示並跳到出錯位置。
 
 * **翻譯品質**
   * 🔍 **逐句檢查**：控制碼、換行數、長度與重複不合格的譯文不寫入，該句保留原文。
@@ -43,7 +44,7 @@
 | TyranoScript | 散檔或 `app.asar` | 散檔直接改寫；asar 只改檔頭，劇本放在 `app.asar.unpacked/` |
 | Ren'Py | 編譯後的 `.rpyc`（散檔或 `.rpa` 內） | 不改原腳本，新增語言 `game/tl/yakupatch/` |
 | KiriKiri | 未加密 `.xp3` | 不改原封包，新增 `patch.xp3` |
-| Unity | Mono 版：UI、Utage、Naninovel、自訂類別、`Assembly-CSharp.dll` 字串 | 改寫資產檔，字型換成 Windows 內建中文字型 |
+| Unity | Mono 與 IL2CPP 版：UI、Utage、Naninovel、自訂類別；Mono 版另含 `Assembly-CSharp.dll` 字串 | 改寫資產檔，字型換成 Windows 內建中文字型 |
 | Godot | `.pck` 內的文字場景與 Godot 3 腳本 | 改寫 `.pck`，字型換成中文字型 |
 | Artemis | `.pfs` 內的劇本與表格 | 不改原封包，新增 `.pfs.NNN` |
 | Wolf RPG | 未加密散檔（地圖、共通事件、資料庫） | 直接改寫，附中文替換字型 |
@@ -87,8 +88,10 @@
 
 * **第三步：加入遊戲並翻譯**
   * 把遊戲資料夾加入左側的遊戲庫，依上方步驟條操作：偵測 → 語言預檢 → 提取 → 翻譯 → 寫回。
-  * 已偵測為中文或帶有中文劇本語言包的遊戲會標為「不需翻譯」，批次自動略過。KiriKiri 遊戲也會檢查 README 明列的中文切換快捷鍵，以及設定檔中的可選語言宣告（包含簡易編碼或壓縮的設定檔）；重新掃描即可更新同類遊戲。只有中文字型或中文安裝說明不會觸發排除。若封包已加密、無法自動辨識，但已確認遊戲內能切換中文，可在遊戲庫右鍵勾選「遊戲內可切換中文（不需翻譯）」；標記會保留於重新掃描後，也可取消。排除後不提供翻譯或寫回，仍可還原既有修改。
-  * 要還原遊戲時，按「還原遊戲」。
+  * **已是中文的遊戲**：偵測為中文或內建中文語言包時會標為「不需翻譯」，批次自動略過。
+    * 仍要翻譯：在總覽按「仍要翻譯」，提取後即可正常翻譯與寫回。
+    * 偵測不到但遊戲內能切換中文（例如加密封包）：在遊戲庫右鍵勾選「遊戲內可切換中文（不需翻譯）」；重新掃描後仍保留，可隨時取消。
+  * **還原**：寫回分頁按「還原遊戲」。遊戲被官方更新過的檔案不會被舊備份覆蓋。
 
 ---
 
@@ -107,7 +110,7 @@ yakupatch.bat sakura models
 yakupatch.bat sakura get <模型檔名>
 yakupatch.bat sakura llama
 yakupatch.bat sakura serve
-yakupatch.bat sakura kit <模型檔名> --output D:\SakuraKit --vram 12
+yakupatch.bat sakura kit <模型檔名> --output D:\SakuraKit.zip --vram 12
 ```
 
 所有指令與參數請看 `yakupatch.bat --help`。
@@ -122,7 +125,7 @@ yakupatch.bat sakura kit <模型檔名> --output D:\SakuraKit --vram 12
 | 專案、設定、字典 | `%USERPROFILE%\.yakupatch`（更新或刪除程式資料夾不影響） |
 | 遊戲備份 | 遊戲資料夾內的 `_yakupatch_backup\` |
 | Sakura 模型與 llama.cpp | `%USERPROFILE%\.yakupatch\sakura\models`、`sakura\llama` |
-| 錯誤記錄 | `%USERPROFILE%\.yakupatch\logs\gui.log`；Sakura 伺服器為 `llama-server.log` |
+| 工作紀錄 | `%USERPROFILE%\.yakupatch\logs\gui-*.log`（保留最近 20 次啟動）；Sakura 伺服器為 `llama-server.log` |
 
 **更新**：下載新版壓縮包覆蓋程式資料夾，或重新執行安裝腳本。有新版時，視窗下方的狀態列會顯示下載連結。
 
@@ -143,8 +146,23 @@ yakupatch-gui
 Windows 的 Unity 巢狀泛型及 managed reference 修正使用自行編譯的 TypeTreeGeneratorAPI。
 原始碼安裝需先安裝 Git、.NET 9 SDK、Visual Studio C++ 建置工具，再執行
 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_typetree.ps1`。
-`build_win.ps1` 會自動執行此步驟，產生的免安裝 ZIP 已包含修正 DLL，不需要使用者安裝編譯工具。
+`build_win.ps1` 會自動執行此步驟（已建置且原始碼與修補未變時會略過），產生的免安裝 ZIP 已包含修正 DLL，不需要使用者安裝編譯工具。
 線上 PowerShell 原始碼安裝方式仍使用 PyPI 版本；需要此修正請使用重新建置的 ZIP。
+
+</details>
+
+<details>
+<summary><h2>版本更新 📝</h2></summary>
+
+**1.3.0**
+
+* 遊戲庫：記住掃描資料夾、重新掃描（未變動的遊戲直接沿用結果）、一次移除不需翻譯或不支援的遊戲。
+* 批次：多選翻譯、「一鍵提取→翻譯→寫回」，以及整體、批次與各階段進度條。
+* 自動排除內建中文的遊戲（KiriKiri、Unity），也可手動標記；「仍要翻譯」可強制翻譯。
+* Unity：支援 IL2CPP、巢狀泛型與 managed reference；大型遊戲寫回預覽不再卡住視窗。
+* 本地 Sakura：模型管理（下載、刪除、自動啟動），預設 8 槽與 Q8 KV cache，簡易啟動包 ZIP。
+* 工作紀錄與異常回報：輸出同步顯示於 GUI，上次異常結束時可直接查看出錯前後文。
+* 穩定性：寫回途中中斷仍可完整還原；翻譯快取查詢大幅加快；修正更新檢查偶發當機。
 
 </details>
 

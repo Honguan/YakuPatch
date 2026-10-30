@@ -16,11 +16,12 @@
 
 * **Works on the game itself, no separate extraction tool**
   * 🎮 **8 engines**: detects the engine, then extracts, translates and writes back in one flow.
-  * 🛡️ **Safe and reversible**: backs up before writing and restores in one click; each translation run can be undone on its own.
+  * 🛡️ **Safe and reversible**: backs up before writing and restores in one click, even after a crash or a closed window mid-writeback; each translation run can be undone on its own.
   * 📚 **Batch processing**: select several games in the library and press 批次翻譯選取遊戲 (Translate selected games) to process them in turn, or press 一鍵提取→翻譯→寫回 (One-click extract → translate → apply) to also write the results back; the translate tab shows overall, batch and per-stage (extract / translate / write back) progress bars.
   * 🗂️ **Library management**: scanned folders are remembered and can be rescanned with 重新掃描; games that need no translation or are unsupported can be removed in one click.
   * 🤝 **Share translations**: export a share file that holds only the translations (no game text); others apply it to the same game with 匯入譯文 (Import translations).
-  * 🈶 **Stops on Chinese games**: skips games that are already in Chinese or ship a Chinese language pack.
+  * 🈶 **Stops on Chinese games**: skips games that are already in Chinese or ship a Chinese language pack; press 仍要翻譯 (Translate anyway) to override.
+  * 🩺 **Job log and crash reports**: the toolbar's 工作紀錄 (Job log) shows all output live; after an abnormal exit, the next launch points you to the error.
 
 * **Translation quality**
   * 🔍 **Checks every line**: a translation with broken control codes, a wrong line count, an odd length or repetition is not written; that line keeps the original.
@@ -43,7 +44,7 @@
 | TyranoScript | Loose files or `app.asar` | Loose files in place; for asar, patches the header and puts scripts in `app.asar.unpacked/` |
 | Ren'Py | Compiled `.rpyc` (loose or inside `.rpa`) | Leaves the scripts alone and adds a language in `game/tl/yakupatch/` |
 | KiriKiri | Unencrypted `.xp3` | Leaves the archive alone and adds `patch.xp3` |
-| Unity | Mono builds: UI, Utage, Naninovel, custom classes, `Assembly-CSharp.dll` strings | Rewrites the asset files and switches fonts to a built-in Windows Chinese font |
+| Unity | Mono and IL2CPP builds: UI, Utage, Naninovel, custom classes; Mono builds also `Assembly-CSharp.dll` strings | Rewrites the asset files and switches fonts to a built-in Windows Chinese font |
 | Godot | Text scenes and Godot 3 scripts inside `.pck` | Rewrites the `.pck` and switches fonts to a Chinese font |
 | Artemis | Scripts and tables inside `.pfs` | Leaves the archive alone and adds `.pfs.NNN` |
 | Wolf RPG | Unencrypted loose files (maps, common events, databases) | Rewrites in place and ships a Chinese substitute font |
@@ -87,8 +88,10 @@
 
 * **Step 3: Add a game and translate**
   * Add the game folder to the library on the left and follow the step bar at the top: Detect → Language check → Extract → Translate → Apply.
-  * Games detected as Chinese or containing Chinese scenario packs are marked 不需翻譯 (No translation needed) and skipped in batches. KiriKiri detection also checks explicit Chinese language-switch shortcuts in README files and supported-language declarations in configuration scripts, including simply scrambled or compressed configurations. Rescan to update matching games. Chinese fonts or installation instructions alone do not trigger exclusion. For encrypted games whose Chinese option you have confirmed in-game, right-click the library entry and select 遊戲內可切換中文（不需翻譯）. The reversible flag survives rescans. Translation and applying patches are disabled in the GUI, while restoring existing changes remains available.
-  * To restore the game, click 還原遊戲 (Restore game).
+  * **Games already in Chinese**: games detected as Chinese or shipping a Chinese language pack are marked 不需翻譯 (No translation needed) and skipped in batches.
+    * To translate anyway: press 仍要翻譯 (Translate anyway) on the overview; after extraction you can translate and apply as usual.
+    * Not detected but switchable in-game (e.g. encrypted archives): right-click the library entry and tick 遊戲內可切換中文（不需翻譯）. The mark survives rescans and can be removed.
+  * **Restore**: press 還原遊戲 (Restore game) on the writeback tab. Files an official game update changed are never overwritten with old backups.
 
 > The interface is in Traditional Chinese.
 
@@ -109,7 +112,7 @@ yakupatch.bat sakura models
 yakupatch.bat sakura get <model file>
 yakupatch.bat sakura llama
 yakupatch.bat sakura serve
-yakupatch.bat sakura kit <model file> --output D:\SakuraKit --vram 12
+yakupatch.bat sakura kit <model file> --output D:\SakuraKit.zip --vram 12
 ```
 
 Run `yakupatch.bat --help` for every command and option.
@@ -124,7 +127,7 @@ Run `yakupatch.bat --help` for every command and option.
 | Projects, settings, dictionaries | `%USERPROFILE%\.yakupatch` (updating or deleting the program folder leaves them intact) |
 | Game backups | `_yakupatch_backup\` inside the game folder |
 | Sakura models and llama.cpp | `%USERPROFILE%\.yakupatch\sakura\models`, `sakura\llama` |
-| Error log | `%USERPROFILE%\.yakupatch\logs\gui.log`; the Sakura server writes `llama-server.log` |
+| Job log | `%USERPROFILE%\.yakupatch\logs\gui-*.log` (last 20 launches kept); the Sakura server writes `llama-server.log` |
 
 **Update**: unzip the new release over the program folder, or run the install script again. When a new version is out, the status bar shows a download link.
 
@@ -141,6 +144,28 @@ yakupatch-gui
 ```
 
 Run the tests with `python -X utf8 -m unittest discover -s tests -t tests`.
+
+On Windows, the Unity nested-generic and managed-reference fixes use a self-built TypeTreeGeneratorAPI.
+For a source install, install Git, the .NET 9 SDK and the Visual Studio C++ build tools, then run
+`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_typetree.ps1`.
+`build_win.ps1` runs this step automatically (skipped when it is already built and nothing changed); the portable ZIP
+already contains the fixed DLL, so users need no build tools. The online PowerShell source install still uses the PyPI
+version; use a rebuilt ZIP if you need the fix.
+
+</details>
+
+<details>
+<summary><h2>Release notes 📝</h2></summary>
+
+**1.3.0**
+
+* Library: remembers scanned folders, rescans (unchanged games reuse their results), removes games that need no translation or are unsupported in one click.
+* Batch: multi-select translation, 一鍵提取→翻譯→寫回 (one-click extract → translate → apply), plus overall, batch and per-stage progress bars.
+* Games with built-in Chinese (KiriKiri, Unity) are excluded automatically or by a manual mark; 仍要翻譯 (Translate anyway) overrides.
+* Unity: IL2CPP, nested generics and managed references; large writeback previews no longer freeze the window.
+* Local Sakura: model management (download, delete, auto-start), 8 slots and Q8 KV cache by default, lightweight kit ZIP.
+* Job log and crash reports: output mirrored in the GUI; after an abnormal exit you can open the context around the error.
+* Stability: an interrupted writeback stays fully restorable; much faster translation-cache lookups; fixed an occasional crash in the update check.
 
 </details>
 
