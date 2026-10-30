@@ -1,10 +1,17 @@
+import atexit
 import json
+import os
 import re
 import shutil
 import tempfile
 from pathlib import Path
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+# Tests call mkdtemp freely; keep everything (child processes too) in one folder removed at exit.
+_RUN = tempfile.mkdtemp(prefix="yakupatch-tests-")
+tempfile.tempdir = os.environ["TEMP"] = os.environ["TMP"] = os.environ["TMPDIR"] = _RUN
+atexit.register(shutil.rmtree, _RUN, ignore_errors=True)
 
 
 def copy_game(name: str) -> tuple[Path, Path]:

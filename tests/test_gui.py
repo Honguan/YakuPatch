@@ -343,9 +343,10 @@ class Gui(unittest.TestCase):
     def test_one_click_batch_fills_every_stage(self):
         win = self.win
         win.lib_list.item(0).setSelected(True)
-        win.batch_apply.setChecked(True)
+        from PySide6.QtWidgets import QPushButton
+        button = next(b for b in win.findChildren(QPushButton) if b.text() == "一鍵提取→翻譯→寫回")
         with patch.object(MainWindow, "make_backend", lambda self, name=None: (IdsFake(), "sakura")):
-            win.batch_translate()
+            button.click()
             self.idle()
         self.assertEqual([r["status"] for r in win.batch_job.result], ["ok"])
         self.assertNotEqual(snapshot(self.game), self.original)                   # extracted, translated, written back
@@ -359,7 +360,6 @@ class Gui(unittest.TestCase):
         win = self.win
         win.lib_list.item(0).setSelected(True)
         button = next(b for b in win.findChildren(QPushButton) if b.text() == "批次翻譯選取遊戲")
-        self.assertFalse(win.batch_apply.isChecked())
         with patch.object(MainWindow, "make_backend", lambda self, name=None: (IdsFake(), "sakura")):
             with patch.object(QMessageBox, "question", return_value=QMessageBox.No):
                 button.click()

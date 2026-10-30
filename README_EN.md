@@ -17,7 +17,7 @@
 * **Works on the game itself, no separate extraction tool**
   * 🎮 **8 engines**: detects the engine, then extracts, translates and writes back in one flow.
   * 🛡️ **Safe and reversible**: backs up before writing and restores in one click; each translation run can be undone on its own.
-  * 📚 **Batch processing**: select several games in the library and press 批次翻譯選取遊戲 (Translate selected games) to process them in turn. Check 完成後寫回遊戲 (Apply when finished) to write the results back automatically; the translate tab shows overall, batch and per-stage (extract / translate / write back) progress bars.
+  * 📚 **Batch processing**: select several games in the library and press 批次翻譯選取遊戲 (Translate selected games) to process them in turn, or press 一鍵提取→翻譯→寫回 (One-click extract → translate → apply) to also write the results back; the translate tab shows overall, batch and per-stage (extract / translate / write back) progress bars.
   * 🗂️ **Library management**: scanned folders are remembered and can be rescanned with 重新掃描; games that need no translation or are unsupported can be removed in one click.
   * 🤝 **Share translations**: export a share file that holds only the translations (no game text); others apply it to the same game with 匯入譯文 (Import translations).
   * 🈶 **Stops on Chinese games**: skips games that are already in Chinese or ship a Chinese language pack.

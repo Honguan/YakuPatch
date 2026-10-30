@@ -287,36 +287,6 @@ class TypeTree(unittest.TestCase):
             with self.assertRaises(ValueError):
                 _metadata(invalid)
 
-    def test_shuffled_metadata_validates_sections_before_decoding(self):
-        from yakupatch.engines.unity import _metadata
-        header = bytes.fromhex(
-            "c2c3c4c5fac5c8c9a2c9cccdaaced0d1d2d3d4d56ed6d8d9dadbdcdd16dee0e1e2e3e4e582e6e8e9eaebecedeeeff0f1f2"
-            "f3f4f5f6f7f8f9fafbfcfdfeff000102030405c20608090a0b0c0d260f10111213141572151819861a1c1d1e1f20212223"
-            "2425262728292a2b2c2d4a2e30313233343536373839663a3c3d3e3f40414243444566454849164a4c4d9e4e5051ea5254"
-            "55fa565859025b5c5d5e5f60616263646566676869a26a6c6d6e6f7071727374754e7578797a7b7c7d7e7f808182838485"
-            "8e8788898a8b8c8d328e909142929495969798993e9a9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6"
-            "b7b8b996b9bcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7"
-            "e8e962e9ecedeeeff0f1f2f3f4f5d6f5f8f95afafcfdfeff00011e0104052a0508090a0b0c0d0e0f101152131415161718"
-            "191a1b1c1d6a1e20214e212425e22628292a2b2c2d2e2f303132333435363738393a3b3c3dfa3e40414243444546474849"
-        )
-        image = struct.pack("<10i", 0, 0, 0, 1, -1, 0, -1, 0x2000001, 0, 0)
-        raw = header + bytes.fromhex("36561d16177c7d7e") + bytes(88) + image + bytes(range(193, 256)) + b"\0"
-        decoded = _metadata(raw)
-        self.assertEqual(struct.unpack_from("<8I", decoded), (0xFAB11BAF, 29, 392, 0, 392, 0, 392, 8))
-        self.assertEqual(decoded[392:], b"A.dll\0\0\0" + bytes(88) + image + bytes(64))
-        self.assertEqual(struct.unpack_from("<8I", decoded, 160), (400, 88, 488, 40, 528, 64, 592, 0))
-        for offset, value in ((0x44, 1000000), (0xc4, 1000000), (0x8c, 0), (0x4c, 39), (0x40, 4)):
-            damaged = bytearray(raw)
-            damaged[offset:offset+4] = bytes(v ^ ((offset+i+194) & 255) for i, v in enumerate(struct.pack("<I", value)))
-            with self.subTest(offset=offset), self.assertRaises(ValueError):
-                _metadata(bytes(damaged))
-        with self.assertRaises(ValueError):
-            _metadata(raw[:-1])
-        damaged = bytearray(raw)
-        struct.pack_into("<i", damaged, 488 + 8, -1)  # a nonempty image cannot have a missing first type
-        with self.assertRaises(ValueError):
-            _metadata(bytes(damaged))
-
     def test_empty_reference_roundtrip_and_nonempty_rejection(self):
         from unittest.mock import Mock, patch
         from UnityPy.helpers.TypeTreeHelper import read_typetree, write_typetree

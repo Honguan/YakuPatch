@@ -8,6 +8,8 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
+
+import helpers  # noqa: F401  (redirects temp folders and cleans them up)
 from yakupatch import sakura_kit as kit
 from yakupatch.backends.sakura import Sakura, SakuraConfig
 

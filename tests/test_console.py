@@ -14,6 +14,25 @@ class Console(unittest.TestCase):
         self.assertEqual(result.returncode, 17)
         self.assertIsNotNone(previous_abnormal(folder))
 
+    def test_prune_keeps_newest_live_and_spared_sessions(self):
+        import tempfile
+        from pathlib import Path
+        from yakupatch.gui.console import _session_lock, prune_sessions
+        folder = Path(tempfile.mkdtemp())
+        for i in range(6):
+            for suffix in ('.session', '.log'):
+                path = folder / f'gui-{i}{suffix}'
+                path.write_bytes(b'N')
+                os.utime(path, (1000 + i, 1000 + i))
+        live = (folder / 'gui-0.session').open('r+b')
+        _session_lock(live, True)
+        try:
+            prune_sessions(folder, keep=2, spare=folder / 'gui-1.log')
+        finally:
+            _session_lock(live, False)
+            live.close()
+        self.assertEqual(sorted(p.name for p in folder.glob('*.log')), ['gui-0.log', 'gui-1.log', 'gui-4.log', 'gui-5.log'])
+
     def test_crash_context_finds_error_before_large_normal_tail(self):
         from pathlib import Path
         from yakupatch.gui.console import read_error_context

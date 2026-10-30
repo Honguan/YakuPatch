@@ -83,8 +83,9 @@ def _chinese_probe(entry: dict, manifest: dict) -> dict:
 
 
 def translation_blocked(game: Path, plugin, store: Store) -> bool:
-    entry = Library().games.get(str(Path(game).resolve()), {})
-    return bool(_chinese_probe(entry, store.manifest) or plugin.language_packs(game))
+    entry = Library().games.get(str(Path(game).resolve()))
+    # A scanned game's probe already lists its language packs; only unscanned games need the slow engine check.
+    return bool(_chinese_probe(entry or {}, store.manifest) or (entry is None and plugin.language_packs(game)))
 
 
 def _check_translation(store: Store, plugin, limit, only) -> None:

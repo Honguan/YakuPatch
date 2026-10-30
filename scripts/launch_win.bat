@@ -1,7 +1,7 @@
 @echo off
 rem YakuPatch launcher: checks the bundled packages, then runs the GUI in this console so all its output shows here.
 chcp 65001 >nul
-title YakuPatch - 啟動與診斷（關閉此視窗會結束程式）
+title YakuPatch - launcher (closing this window closes YakuPatch)
 setlocal
 cd /d "%~dp0"
 set "PY=%~dp0runtime\python.exe"

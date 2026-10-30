@@ -34,6 +34,23 @@ def previous_abnormal(folder):
     return None
 
 
+def prune_sessions(folder, keep=20, spare=None):
+    """Delete logs of finished sessions beyond the newest `keep`; live sessions hold their lock and stay."""
+    sessions = sorted(folder.glob("gui-*.session"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for path in sessions[keep:]:
+        log = path.with_suffix(".log")
+        if log == spare:
+            continue
+        try:
+            with path.open("r+b") as file:
+                _session_lock(file, True)
+                _session_lock(file, False)
+            log.unlink(missing_ok=True)
+            path.unlink()
+        except OSError:
+            continue
+
+
 def read_error_context(path):
     before = deque(maxlen=20)
     context, target, error_line, after = [], 0, 0, 0
@@ -77,6 +94,7 @@ class ConsoleCapture:
         folder = projects_home().parent / "logs"
         folder.mkdir(parents=True, exist_ok=True)
         self.previous_log = previous_abnormal(folder)
+        prune_sessions(folder, spare=self.previous_log)
         self.log_path = folder / f"gui-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}.log"
         self.log = self.log_path.open("xb", buffering=0)
         self.session = self.log_path.with_suffix(".session").open("x+b", buffering=0)
