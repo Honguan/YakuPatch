@@ -9,7 +9,7 @@ $revision = "df79bd6a786d4ba52ed4a7b3d40047ecf578256b"
 # Rebuild only when the pinned revision, our patch or the regression fixture changed.
 $inputs = @("$PSScriptRoot\typetree.patch") + (Get-ChildItem "$root\tests\fixtures\typetree" -File).FullName
 $stamp = (@($revision) + ($inputs | ForEach-Object { (Get-FileHash $_ -Algorithm SHA256).Hash })) -join "`n"
-$stampFile = Join-Path $native "build.stamp"
+$stampFile = Join-Path $root "build\typetree.stamp"   # outside yakupatch\native so it is not packaged
 if ((Test-Path "$native\TypeTreeGeneratorAPI.dll") -and (Test-Path "$root\build\typetree-fixture\GenericFields.dll") `
         -and (Test-Path $stampFile) -and ((Get-Content $stampFile -Raw) -eq $stamp)) {
     Write-Host "TypeTreeGeneratorAPI is up to date; skipping its build"

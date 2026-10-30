@@ -152,11 +152,11 @@ class Gui(unittest.TestCase):
             "更多文本操作": ["套用到相同原文", "全文 QA"],
             "查詢譯名": ["查字典", "VNDB 角色名單", "Wikidata 查譯名"],
             "匯入／匯出": ["匯出分批檔", "匯入譯文", "匯出分享檔"],
-            "遊戲操作": ["還原遊戲", "啟動遊戲"],
         }.items():
             self.assertEqual([a.text() for a in menus[title].actions()], actions)
             self.assertFalse(any(b.text() in actions for b in buttons))
         self.assertFalse(any(b.text() == "重翻此句" for b in buttons))
+        self.assertTrue({"還原遊戲", "啟動遊戲"} <= {b.text() for b in buttons})   # frequent actions stay visible
         self.assertEqual(self.win.f_flag.findData("failed"), -1)
         callback = Mock()
         button = self.win._menu_button("test", (("action", callback),))
