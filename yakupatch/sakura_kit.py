@@ -7,6 +7,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import time
 import zipfile
@@ -239,6 +240,9 @@ def install_llama(variant: str, folder: Path | None = None, progress=None, stop=
         return target
     total = sum(a["size"] for a in assets)
     base = 0
+    # Unpack beside the target and rename at the end: a paused CUDA runtime download must not look installed.
+    final, target = target, target.with_name(target.name + ".partial")
+    shutil.rmtree(target, ignore_errors=True)
     for asset in assets:
         digest = asset.get("digest", "").removeprefix("sha256:")
         zip_path = download(asset["browser_download_url"], home() / "downloads" / asset["name"], digest,
@@ -252,7 +256,9 @@ def install_llama(variant: str, folder: Path | None = None, progress=None, stop=
         base += asset["size"]
     if not server_exe(target):
         raise OSError("llama.cpp 解壓後找不到 llama-server.exe")
-    return target
+    shutil.rmtree(final, ignore_errors=True)               # an older unfinished install without the marker rename
+    os.replace(target, final)
+    return final
 
 
 def server_exe(folder: Path) -> Path | None:

@@ -707,11 +707,6 @@ class MainWindow(ActivityMixin, LibraryMixin, WritebackMixin, QMainWindow):
             n = core.apply_same(self.current[2], rec["id"])
             self.statusBar().showMessage(tr("已套用到 {} 句相同原文").format(n), 5000)
 
-    def retranslate_current(self):
-        rec = self._rec()
-        if rec:
-            self.start_translation(only=[rec["id"]], fresh=True)
-
     def retranslate_selected(self):
         ids = self.selected_ids()
         if ids:

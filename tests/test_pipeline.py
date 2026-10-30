@@ -192,6 +192,17 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(self.run_fake(backend)['cached'], 0)
         self.assertEqual(len(backend.calls), 3)
 
+    def test_cache_lookup_spans_parameter_chunks(self):
+        store = Store(self.store.dir.parent / 'cache-many')
+        store.dir.mkdir(parents=True)
+        with sqlite3.connect(store.dir / 'cache.sqlite3') as conn:
+            conn.execute('CREATE TABLE translations (key TEXT PRIMARY KEY, dst TEXT NOT NULL)')
+            conn.executemany('INSERT INTO translations VALUES (?, ?)', [(str(i), f'譯{i}') for i in range(0, 1200, 2)])
+        conn.close()
+        found = pipeline.cache_get_many(store, [str(i) for i in range(1200)] + ['0'])
+        self.assertEqual(found, {str(i): f'譯{i}' for i in range(0, 1200, 2)})
+        self.assertEqual(pipeline.cache_get_many(Store(store.dir.parent / 'none'), ['0']), {})
+
     def test_dry_run_limit_does_not_write_or_connect(self):
         before = snapshot(self.store.dir)
         with patch.object(Sakura, '_request', side_effect=AssertionError('network')), redirect_stdout(io.StringIO()) as out:

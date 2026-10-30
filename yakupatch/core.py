@@ -372,10 +372,13 @@ class Library:
         data = json.loads(self.path.read_text("utf-8")) if self.path.exists() else {}
         self.games: dict[str, dict] = data.get("games", {})
         self.folders: list[str] = data.get("folders", [])      # scanned parent folders, rescanned together
+        # Scans run on a worker thread while the GUI removes or marks games; slow detection stays outside the lock.
+        self.lock = threading.RLock()
 
     def _save(self) -> None:
-        atomic_write(self.path, json.dumps({"games": self.games, "folders": self.folders}, ensure_ascii=False,
-                                           indent=1).encode("utf-8"))
+        with self.lock:
+            body = json.dumps({"games": self.games, "folders": self.folders}, ensure_ascii=False, indent=1)
+        atomic_write(self.path, body.encode("utf-8"))
 
     def add(self, path: Path) -> list[str]:
         game, plugin, _ = open_game(path)
@@ -384,8 +387,9 @@ class Library:
     def scan(self, parent: Path, depth: int = 5, progress=None, stop=None) -> list[str]:
         """Remembers `parent` for rescan(); progress gets {"stage": "掃描", "index", "of", "game"} per game found."""
         parent = Path(parent).resolve()
-        if str(parent) not in self.folders:
-            self.folders.append(str(parent))
+        with self.lock:
+            if str(parent) not in self.folders:
+                self.folders.append(str(parent))
         if progress:
             progress({"stage": "尋找遊戲", "game": str(parent)})
         return self._add(engines.find_game_roots(parent, depth), progress, stop)
@@ -401,8 +405,9 @@ class Library:
         return found
 
     def forget_folder(self, folder: str) -> None:
-        self.folders = [f for f in self.folders if f != folder]
-        self._save()
+        with self.lock:
+            self.folders = [f for f in self.folders if f != folder]
+            self._save()
 
     def _add(self, roots, progress=None, stop=None) -> list[str]:
         added = []
@@ -411,7 +416,8 @@ class Library:
                 break
             if progress:
                 progress({"stage": "掃描", "index": i, "of": len(roots), "game": str(game)})
-            entry = self.games.setdefault(str(game), {"engine": plugin.name})
+            with self.lock:
+                entry = dict(self.games.get(str(game), {"engine": plugin.name}))
             try:
                 fingerprint = plugin.scan_fingerprint(game)
             except Exception:                    # cache validation must not prevent normal error reporting
@@ -421,34 +427,40 @@ class Library:
                 entry.update({"engine": plugin.name, **_detect(game, plugin), "scan_fingerprint": fingerprint})
                 if entry.get("unsupported"):
                     print(f"[掃描失敗] {game}：{entry['unsupported']}", flush=True)
+            with self.lock:                      # the GUI's Chinese mark may have changed during detection
+                self.games.setdefault(str(game), {}).update({k: v for k, v in entry.items() if k != "builtin_chinese"})
             added.append(str(game))
         self._save()
         return added
 
     def redetect(self, key: str) -> None:
         game, plugin, _ = open_game(Path(key))
-        self.games[key].pop("scan_fingerprint", None)
         try:
             plugin.scan_fingerprint(game)        # also invalidates an in-memory Unity context after file changes
         except Exception:
             pass
-        self.games[key].update({"engine": plugin.name, **_detect(game, plugin)})
-        self._save()
+        detected = _detect(game, plugin)
+        with self.lock:
+            self.games[key].pop("scan_fingerprint", None)
+            self.games[key].update({"engine": plugin.name, **detected})
+            self._save()
 
     def set_builtin_chinese(self, key: str, enabled: bool) -> None:
-        if enabled:
-            self.games[key]["builtin_chinese"] = True
-        else:
-            self.games[key].pop("builtin_chinese", None)
-        self._save()
+        with self.lock:
+            if enabled:
+                self.games[key]["builtin_chinese"] = True
+            else:
+                self.games[key].pop("builtin_chinese", None)
+            self._save()
 
     def remove(self, key: str) -> None:
         self.remove_many([key])
 
     def remove_many(self, keys) -> None:
-        for key in keys:
-            self.games.pop(key, None)
-        self._save()
+        with self.lock:
+            for key in keys:
+                self.games.pop(key, None)
+            self._save()
 
     def row(self, key: str, home: Path | None = None, store: Store | None = None) -> dict:
         """Name, engine, language label, status and progress of one library row (§11.3)."""

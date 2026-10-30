@@ -1,4 +1,5 @@
 """Writeback pipeline W1–W7 (PROJECT_PLAN §7). All files succeed or everything is rolled back."""
+import copy
 import re
 import shutil
 import unicodedata
@@ -196,27 +197,34 @@ def commit(game_dir: Path, apply: ApplyPlan) -> None:                    # W7
     if shutil.disk_usage(game_dir).free < need * 2:
         raise OSError("磁碟空間不足")
     backup, done = Backup(game_dir), []
+    saved = copy.deepcopy(backup.files)
+    # Rollback copies are hard links (no memory, no extra disk) kept until this writeback finishes.
+    rollback = backup.dir / "rollback"
+    shutil.rmtree(rollback, ignore_errors=True)
     try:
         for rel, (data, head) in apply.writes.items():
             path = safe_path(game_dir, rel)
             if head:
                 before = read_head(path, len(data))
                 backup.ensure(rel, backup.original_head(rel) or before, head=True)
+                backup.set_pending(rel, data)
                 done.append((path, before, True))
                 write_head(path, data)
                 backup.set_patched(rel, data)
                 continue
-            before = path.read_bytes() if path.exists() else None
+            keep = _keep(path, safe_path(rollback, rel)) if path.exists() else None
             if data is None:                                             # a file we added, no longer needed
-                done.append((path, before, False))
+                done.append((path, keep, False))
                 remove_created(path)
                 backup.drop(rel)
+                backup.save()
                 continue
-            if before is None or backup.is_created(rel):
+            if keep is None and not backup.is_created(rel):
                 backup.created(rel, data)
-            else:
+            elif not backup.is_created(rel):
                 backup.ensure(rel, backup.original_bytes(rel))
-            done.append((path, before, False))
+            backup.set_pending(rel, data)
+            done.append((path, keep, False))
             atomic_write(path, data)
             backup.set_patched(rel, data)
         backup.save()
@@ -227,5 +235,18 @@ def commit(game_dir: Path, apply: ApplyPlan) -> None:                    # W7
             elif before is None:
                 path.unlink(missing_ok=True)
             else:
-                atomic_write(path, before)
+                os.replace(before, path)
+        backup.files = saved
+        backup.save()
         raise
+    finally:
+        shutil.rmtree(rollback, ignore_errors=True)
+
+
+def _keep(path: Path, copy_to: Path) -> Path:
+    copy_to.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.link(path, copy_to)                 # atomic_write replaces `path`, so the link keeps the old content
+    except OSError:                            # e.g. FAT32 has no hard links
+        shutil.copy2(path, copy_to)
+    return copy_to

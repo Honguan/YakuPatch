@@ -210,6 +210,51 @@ class EndToEnd(unittest.TestCase):
         self.assertTrue(all(r == "restored" for _, r in results))
         self.assertEqual(snapshot(self.game), self.original)
 
+    def test_killed_writeback_stays_restorable(self):
+        import subprocess
+        import sys
+        self.translate_all()
+        child = ("import os, sys; from pathlib import Path; from yakupatch import engines, writeback\n"
+                 "from yakupatch.exchange import Store\n"
+                 "game, store = Path(sys.argv[1]), Store(Path(sys.argv[2]))\n"
+                 "mz = next(p for p in engines.PLUGINS if p.name == 'rpgmaker-mz')\n"
+                 "real, n = writeback.atomic_write, [0]\n"
+                 "def dying(path, data):\n"
+                 "    real(path, data); n[0] += 1\n"
+                 "    if n[0] == 2: os._exit(9)\n"           # like closing the console window mid-apply
+                 "writeback.atomic_write = dying\n"
+                 "writeback.commit(game, writeback.plan(game, store, mz))\n")
+        for then_reapply in (False, True):
+            with self.subTest(then_reapply=then_reapply):
+                code = subprocess.run([sys.executable, "-X", "utf8", "-c", child, str(self.game), str(self.store.dir)],
+                                      timeout=60).returncode
+                self.assertEqual(code, 9)
+                self.assertNotEqual(snapshot(self.game), self.original)
+                if then_reapply:                             # must not back up the half-patched files as originals
+                    writeback.commit(self.game, writeback.plan(self.game, self.store, MZ))
+                Backup(self.game).restore()
+                self.assertEqual(snapshot(self.game), self.original)
+
+    def test_failed_writeback_rolls_back_files_and_manifest(self):
+        from unittest.mock import patch
+        self.translate_all()
+        writeback.commit(self.game, writeback.plan(self.game, self.store, MZ))
+        applied, manifest = snapshot(self.game), Backup(self.game).files
+        self.store.update_many("again", [(rid, {"dst": "改" + r["dst"]}) for rid, r in self.store.records.items()
+                                         if r["status"] == "translated"][:20])
+        plan = writeback.plan(self.game, self.store, MZ)
+        real, n = writeback.atomic_write, [0]
+
+        def failing(path, data):
+            n[0] += 1
+            if n[0] == 2:
+                raise OSError("disk full")
+            real(path, data)
+        with patch.object(writeback, "atomic_write", failing), self.assertRaises(OSError):
+            writeback.commit(self.game, plan)
+        self.assertEqual(snapshot(self.game), applied)
+        self.assertEqual(Backup(self.game).files, manifest)
+
     def test_restore_skips_game_update(self):
         self.translate_all()
         writeback.commit(self.game, writeback.plan(self.game, self.store, MZ))
